@@ -1,0 +1,17 @@
+[package]
+name = "rewind-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "rw-daemon"
+path = "src/main.rs"
+
+[dependencies]
+rewind-core = { path = "../rewind-core" }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+git2 = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
