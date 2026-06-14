@@ -11,7 +11,7 @@ fail() {
 }
 
 info() {
-    printf 'rewind install: %s\n' "$*"
+    printf 'rewind install: %s\n' "$*" >&2
 }
 
 need_cmd() {
