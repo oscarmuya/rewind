@@ -31,7 +31,7 @@ pub enum Shell {
 }
 
 impl Shell {
-    fn detect() -> Result<Self> {
+    pub(crate) fn detect() -> Result<Self> {
         let shell = env::var("SHELL").context("could not detect shell: $SHELL is not set")?;
         let name = Path::new(&shell)
             .file_name()
@@ -54,7 +54,7 @@ impl Shell {
         }
     }
 
-    fn config_path(self) -> Result<PathBuf> {
+    pub(crate) fn config_path(self) -> Result<PathBuf> {
         match self {
             Self::Bash => Ok(home_dir()?.join(".bashrc")),
             Self::Zsh => Ok(home_dir()?.join(".zshrc")),

@@ -120,6 +120,37 @@ The installer writes a managed block to:
 - zsh: `~/.zshrc`
 - fish: `$XDG_CONFIG_HOME/fish/config.fish` or `~/.config/fish/config.fish`
 
+## Check Status
+
+Use `rw status` to check whether automatic recording is set up and healthy:
+
+```sh
+rw status
+```
+
+It checks:
+
+- shell integration installation for your detected shell
+- whether the integration is active in the current shell session, when the
+  shell exports the rewind hook marker
+- required shell integration tools: `python3` and `socat`
+- whether `rw-daemon` is accepting Unix socket connections
+- whether the SQLite history database opens, migrates, and passes an integrity
+  check
+
+You can also check a specific shell config:
+
+```sh
+rw status bash
+rw status zsh
+rw status fish
+```
+
+If the hook is installed but the runtime check warns that it is not visible,
+restart your shell or source your shell startup file. If the daemon check fails,
+starting a new hooked shell usually starts `rw-daemon`; you can also run
+`rw-daemon` directly while debugging.
+
 ## Manual Recording
 
 You can record a single command without installing shell hooks:

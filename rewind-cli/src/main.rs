@@ -46,6 +46,9 @@ enum Commands {
     /// Print the shell integration snippet for the given shell.
     Init(cmd::init::Args),
 
+    /// Check shell hook, daemon, and database health.
+    Status(cmd::status::Args),
+
     /// Start the background daemon.
     Daemon,
 }
@@ -66,6 +69,8 @@ impl Commands {
                 cmd::init::execute(args)?;
                 Ok(ExitCode::SUCCESS)
             }
+
+            Self::Status(args) => cmd::status::execute(args),
 
             Self::Daemon => {
                 eprintln!("Use `rw-daemon` directly or let your shell init manage it.");
