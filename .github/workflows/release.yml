@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, for example v0.1.0. Defaults to the current ref."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-ubuntu-24.04-x86_64
+            container: ubuntu:24.04
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git build-essential cmake pkg-config perl tar gzip
+            shell: bash
+          - name: linux-debian-12-x86_64
+            container: debian:12
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git build-essential cmake pkg-config perl tar gzip
+            shell: bash
+          - name: linux-fedora-x86_64
+            container: fedora:latest
+            install: dnf install -y ca-certificates curl git gcc gcc-c++ make cmake pkgconf-pkg-config perl tar gzip
+            shell: bash
+          - name: linux-alpine-x86_64
+            container: alpine:latest
+            install: apk add --no-cache bash ca-certificates curl git build-base cmake pkgconf perl tar gzip
+            shell: bash
+
+    steps:
+      - name: Install system dependencies
+        run: ${{ matrix.install }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Install Rust
+        shell: ${{ matrix.shell }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build release binaries
+        shell: ${{ matrix.shell }}
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --workspace --release --locked
+
+      - name: Package
+        shell: ${{ matrix.shell }}
+        run: |
+          set -euo pipefail
+          package="rewind-${{ matrix.name }}"
+          mkdir -p "dist/$package"
+          cp target/release/rw "dist/$package/"
+          cp target/release/rw-daemon "dist/$package/"
+          cp README.md "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewind-${{ matrix.name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+
+          - name: macos-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
+          rustup default stable
+
+      - name: Build release binaries
+        run: cargo build --workspace --release --locked --target "${{ matrix.target }}"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          package="rewind-${{ matrix.name }}"
+          mkdir -p "dist/$package"
+          cp "target/${{ matrix.target }}/release/rw" "dist/$package/"
+          cp "target/${{ matrix.target }}/release/rw-daemon" "dist/$package/"
+          cp README.md "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rewind-${{ matrix.name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux
+      - build-macos
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          tag="${TAG_NAME:-${GITHUB_REF_NAME}}"
+
+          case "$tag" in
+            v*) ;;
+            *)
+              echo "::error::Release tag must start with v, got '$tag'"
+              exit 1
+              ;;
+          esac
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* \
+              --title "$tag" \
+              --notes "Release artifacts for rewind $tag."
+          fi
