@@ -1,8 +1,8 @@
 # rewind
 
 
-[![CI](https://github.com/oscarmuya/rewind/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/oscarmuya/rewind/actions/workflows/ci.yaml)
-[![Release](https://github.com/oscarmuya/rewind/actions/workflows/release.yaml/badge.svg)](https://github.com/oscarmuya/rewind/actions/workflows/release.yaml)
+[![CI](https://github.com/oscarmuya/rewind/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oscarmuya/rewind/actions/workflows/ci.yml)
+[![Release](https://github.com/oscarmuya/rewind/actions/workflows/release.yml/badge.svg)](https://github.com/oscarmuya/rewind/actions/workflows/release.yml)
 [![Latest Release](https://img.shields.io/github/v/release/oscarmuya/rewind?sort=semver)](https://github.com/oscarmuya/rewind/releases/latest)
 
 `rewind` is a per-project command history tool for your shell. It records the
