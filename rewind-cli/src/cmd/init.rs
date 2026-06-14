@@ -183,4 +183,3 @@ fn home_dir() -> Result<PathBuf> {
         .map(PathBuf::from)
         .context("could not find home directory: $HOME is not set")
 }
-

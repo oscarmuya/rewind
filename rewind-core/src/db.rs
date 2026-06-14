@@ -123,4 +123,3 @@ pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
         started_at,
     })
 }
-
