@@ -1,5 +1,10 @@
 # rewind
 
+
+[![CI](https://github.com/oscarmuya/rewind/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/oscarmuya/rewind/actions/workflows/ci.yaml)
+[![Release](https://github.com/oscarmuya/rewind/actions/workflows/release.yaml/badge.svg)](https://github.com/oscarmuya/rewind/actions/workflows/release.yaml)
+[![Latest Release](https://img.shields.io/github/v/release/oscarmuya/rewind?sort=semver)](https://github.com/oscarmuya/rewind/releases/latest)
+
 `rewind` is a per-project command history tool for your shell. It records the
 commands you run, where you ran them, their Git repository and branch context,
 exit status, duration, and timestamp, then lets you search that history from the
