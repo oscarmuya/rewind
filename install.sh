@@ -33,6 +33,7 @@ normalize_arch() {
 }
 
 linux_distro_asset() {
+    arch="$1"
     os_id=""
     os_like=""
 
@@ -45,37 +46,43 @@ linux_distro_asset() {
 
     case "$os_id" in
         ubuntu | pop | linuxmint | elementary)
-            printf '%s\n' linux-ubuntu-24.04-x86_64
+            printf '%s\n' "linux-ubuntu-24.04-$arch"
             return
             ;;
         debian)
-            printf '%s\n' linux-debian-12-x86_64
+            printf '%s\n' "linux-debian-12-$arch"
             return
             ;;
         fedora | rhel | centos | rocky | almalinux)
-            printf '%s\n' linux-fedora-x86_64
+            printf '%s\n' "linux-fedora-$arch"
             return
             ;;
         alpine)
-            printf '%s\n' linux-alpine-x86_64
+            printf '%s\n' "linux-alpine-$arch"
             return
             ;;
     esac
 
     case " $os_like " in
         *" ubuntu "*)
-            printf '%s\n' linux-ubuntu-24.04-x86_64
+            printf '%s\n' "linux-ubuntu-24.04-$arch"
+            return
             ;;
         *" debian "*)
-            printf '%s\n' linux-debian-12-x86_64
+            printf '%s\n' "linux-debian-12-$arch"
+            return
             ;;
         *" fedora "* | *" rhel "*)
-            printf '%s\n' linux-fedora-x86_64
-            ;;
-        *)
-            fail "unsupported Linux distro '${os_id:-unknown}'. Supported release assets: Ubuntu, Debian, Fedora/RHEL-like, Alpine."
+            printf '%s\n' "linux-fedora-$arch"
+            return
             ;;
     esac
+
+    # Unknown distro (Arch, Void, NixOS, Gentoo, etc.): fall back to the
+    # Debian build as a reasonable generic glibc binary. Alpine (musl) users
+    # on unrecognised distros may have issues.
+    info "unrecognised Linux distro '${os_id:-unknown}' (ID_LIKE='${os_like:-}'); falling back to Debian build"
+    printf '%s\n' "linux-debian-12-$arch"
 }
 
 detect_asset() {
@@ -85,17 +92,12 @@ detect_asset() {
     case "$os" in
         Darwin)
             case "$arch" in
-                x86_64)
-                    printf '%s\n' macos-x86_64
-                    ;;
-                aarch64)
-                    printf '%s\n' macos-aarch64
-                    ;;
+                x86_64)  printf '%s\n' macos-x86_64  ;;
+                aarch64) printf '%s\n' macos-aarch64 ;;
             esac
             ;;
         Linux)
-            [ "$arch" = "x86_64" ] || fail "Linux releases currently support x86_64 only, got $arch"
-            linux_distro_asset
+            linux_distro_asset "$arch"
             ;;
         *)
             fail "unsupported operating system: $os"
@@ -126,18 +128,17 @@ verify_checksum() {
     checksums="$1"
     archive="$2"
     asset="$3"
-    checksum_line="$(grep "  $asset\$" "$checksums" || true)"
 
-    [ -n "$checksum_line" ] || fail "checksum file does not contain $asset"
+    checksum_line="$(grep "  ${asset}$" "$checksums")" || fail "checksum file does not contain an entry for $asset"
 
     if command -v sha256sum >/dev/null 2>&1; then
         (cd "$(dirname "$archive")" && printf '%s\n' "$checksum_line" | sha256sum -c -)
     elif command -v shasum >/dev/null 2>&1; then
         expected="$(printf '%s\n' "$checksum_line" | awk '{print $1}')"
         actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
-        [ "$expected" = "$actual" ] || fail "checksum verification failed for $asset"
+        [ "$expected" = "$actual" ] || fail "checksum mismatch for $asset"
     else
-        info "skipping checksum verification; sha256sum or shasum is not installed"
+        info "skipping checksum verification: sha256sum and shasum not found"
     fi
 }
 
@@ -162,21 +163,23 @@ trap cleanup EXIT INT TERM
 info "detected $asset_platform"
 info "downloading $url"
 
-curl -fsSL "$url" -o "$tmp/$asset" || fail "download failed for $url"
+curl -fsSL "$url" -o "$tmp/$asset" || fail "download failed: $url"
 
-if curl -fsSL "$base_url/SHA256SUMS" -o "$tmp/SHA256SUMS"; then
+if curl -fsSL "$base_url/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
     verify_checksum "$tmp/SHA256SUMS" "$tmp/$asset" "$asset"
 else
-    info "SHA256SUMS was not available; continuing without checksum verification"
+    info "SHA256SUMS not available; skipping checksum verification"
 fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
 
-[ -x "$tmp/$package/rw" ] || fail "archive is missing rw"
-[ -x "$tmp/$package/rw-daemon" ] || fail "archive is missing rw-daemon"
+# GitHub's artifact system strips file permissions, so executability is set
+# explicitly below rather than checked here.
+[ -f "$tmp/$package/rw" ]        || fail "archive is missing rw"
+[ -f "$tmp/$package/rw-daemon" ] || fail "archive is missing rw-daemon"
 
 mkdir -p "$target_dir"
-cp "$tmp/$package/rw" "$target_dir/rw"
+cp "$tmp/$package/rw"        "$target_dir/rw"
 cp "$tmp/$package/rw-daemon" "$target_dir/rw-daemon"
 chmod 755 "$target_dir/rw" "$target_dir/rw-daemon"
 
