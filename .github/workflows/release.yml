@@ -89,9 +89,6 @@ jobs:
           - name: linux-fedora-aarch64
             container: fedora:latest
             install: dnf install -y ca-certificates curl git gcc gcc-c++ make cmake pkgconf-pkg-config perl tar gzip
-          - name: linux-alpine-aarch64
-            container: alpine:latest
-            install: apk add --no-cache bash ca-certificates curl git build-base cmake pkgconf perl tar gzip
 
     steps:
       - name: Install system dependencies
