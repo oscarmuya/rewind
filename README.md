@@ -5,6 +5,22 @@ commands you run, where you ran them, their Git repository and branch context,
 exit status, duration, and timestamp, then lets you search that history from the
 terminal.
 
+## Install
+
+Run the installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/oscarmuya/rewind/main/install.sh | sh
+```
+
+The installer installs `rw` and `rw-daemon`.
+
+After installing, enable shell recording:
+
+```sh
+rw init --install
+```
+
 The workspace builds two binaries:
 
 - `rw`: the user-facing CLI for replaying recent commands, setup, search, and
@@ -30,10 +46,11 @@ you do not want them saved in local history.
 
 ## Requirements
 
-- Rust toolchain with Cargo
 - Unix-like system with Unix domain sockets
+- `curl` and `tar` for the release installer
 - `python3` and `socat` for the shell integrations
 - one of `bash`, `zsh`, or `fish` for automatic shell recording
+- Rust toolchain with Cargo when installing from source
 
 ## Install From Source
 
