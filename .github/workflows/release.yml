@@ -29,43 +29,32 @@ jobs:
           - name: linux-ubuntu-24.04-x86_64
             container: ubuntu:24.04
             install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git build-essential cmake pkg-config perl tar gzip
-            shell: bash
           - name: linux-debian-12-x86_64
             container: debian:12
             install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git build-essential cmake pkg-config perl tar gzip
-            shell: bash
           - name: linux-fedora-x86_64
             container: fedora:latest
             install: dnf install -y ca-certificates curl git gcc gcc-c++ make cmake pkgconf-pkg-config perl tar gzip
-            shell: bash
           - name: linux-alpine-x86_64
             container: alpine:latest
             install: apk add --no-cache bash ca-certificates curl git build-base cmake pkgconf perl tar gzip
-            shell: bash
 
     steps:
       - name: Install system dependencies
         run: ${{ matrix.install }}
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
       - name: Install Rust
-        shell: ${{ matrix.shell }}
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build release binaries
-        shell: ${{ matrix.shell }}
-        run: |
-          . "$HOME/.cargo/env"
-          cargo build --workspace --release --locked
+        run: cargo build --workspace --release --locked
 
       - name: Package
-        shell: ${{ matrix.shell }}
         run: |
           set -euo pipefail
           package="rewind-${{ matrix.name }}"
@@ -76,7 +65,7 @@ jobs:
           tar -C dist -czf "dist/$package.tar.gz" "$package"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rewind-${{ matrix.name }}
           path: dist/*.tar.gz
@@ -90,23 +79,22 @@ jobs:
       matrix:
         include:
           - name: macos-x86_64
-            os: macos-15-intel
+            os: macos-13
             target: x86_64-apple-darwin
-
           - name: macos-aarch64
             os: macos-15
             target: aarch64-apple-darwin
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
       - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
-          rustup default stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Build release binaries
         run: cargo build --workspace --release --locked --target "${{ matrix.target }}"
@@ -122,7 +110,7 @@ jobs:
           tar -C dist -czf "dist/$package.tar.gz" "$package"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rewind-${{ matrix.name }}
           path: dist/*.tar.gz
@@ -137,7 +125,7 @@ jobs:
 
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
