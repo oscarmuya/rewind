@@ -192,6 +192,7 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ inputs.tag_name }}
         run: |
           set -euo pipefail
