@@ -55,6 +55,7 @@ jobs:
         run: cargo build --workspace --release --locked
 
       - name: Package
+        shell: bash
         run: |
           set -euo pipefail
           package="rewind-${{ matrix.name }}"
@@ -108,6 +109,7 @@ jobs:
         run: cargo build --workspace --release --locked
 
       - name: Package
+        shell: bash
         run: |
           set -euo pipefail
           package="rewind-${{ matrix.name }}"
@@ -153,6 +155,7 @@ jobs:
         run: cargo build --workspace --release --locked --target "${{ matrix.target }}"
 
       - name: Package
+        shell: bash
         run: |
           set -euo pipefail
           package="rewind-${{ matrix.name }}"
