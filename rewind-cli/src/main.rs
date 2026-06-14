@@ -13,16 +13,21 @@ mod tui;
     about = "rewind — per-project command history",
     long_about = None,
     propagate_version = true,
-    arg_required_else_help = true
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    #[command(flatten)]
+    recent: cmd::recent::Args,
 }
 
 impl Cli {
     fn execute(self) -> Result<ExitCode> {
-        self.command.execute()
+        match self.command {
+            Some(command) => command.execute(),
+            Option::None => cmd::recent::execute(self.recent),
+        }
     }
 }
 
@@ -35,7 +40,7 @@ enum Commands {
     /// Search history interactively or print matches to stdout.
     Search(cmd::search::Args),
 
-    /// Print recent history for the current directory.
+    /// Show recent history or replay from the TUI.
     Recent(cmd::recent::Args),
 
     /// Print the shell integration snippet for the given shell.
@@ -55,10 +60,7 @@ impl Commands {
                 Ok(ExitCode::SUCCESS)
             }
 
-            Self::Recent(args) => {
-                cmd::recent::execute(args)?;
-                Ok(ExitCode::SUCCESS)
-            }
+            Self::Recent(args) => cmd::recent::execute(args),
 
             Self::Init(args) => {
                 cmd::init::execute(args)?;
