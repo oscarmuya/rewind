@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 - 2026-06-15
+
+### Added
+
+- Added `rw status` to check shell integration installation, hook runtime visibility, required shell tools, daemon connectivity, and database health.
+- Added Linux aarch64 release artifacts for Ubuntu, Debian, and Fedora builds.
+
+### Fixed
+
+- Improved the installer to select architecture-specific Linux assets, fall back to the Debian build for unknown glibc Linux distributions, and verify archives more reliably.
+- Fixed installer status output so fallback messages do not get mixed into detected asset names.
+- Improved shell hook startup so stale sockets no longer prevent daemon startup, existing daemons are left running, and background recording is quieter in interactive shells.
 
 ## v0.1.0 - 2026-06-14
 
