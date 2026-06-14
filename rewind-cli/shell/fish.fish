@@ -3,6 +3,9 @@
 # Install with:   rw init --install
 # Remove with:    rw init --uninstall
 
+set -gx REWIND_SHELL_HOOK 1
+set -gx REWIND_SHELL_HOOK_SHELL fish
+
 # Make the snippet safe to source repeatedly.
 functions -e __rewind_sock_dir 2>/dev/null
 functions -e __rewind_sock_path 2>/dev/null
@@ -36,10 +39,6 @@ end
 
 function __rewind_daemon_start
     set -l sock_dir (__rewind_sock_dir)
-    set -l sock (__rewind_sock_path)
-
-    # If the socket exists, assume the daemon is already available.
-    test -S "$sock"; and return
 
     mkdir -p "$sock_dir"
 

@@ -3,6 +3,9 @@
 # Install with:   rw init --install
 # Remove with:    rw init --uninstall
 
+export REWIND_SHELL_HOOK=1
+export REWIND_SHELL_HOOK_SHELL=zsh
+
 __rewind_sock_dir() {
     print -r -- "${XDG_DATA_HOME:-$HOME/.local/share}/rewind"
 }
@@ -25,11 +28,6 @@ __rewind_daemon_start() {
     emulate -L zsh
 
     local sock_dir="$(__rewind_sock_dir)"
-    local sock="$(__rewind_sock_path)"
-
-    # If a socket exists, assume the daemon is already available.
-    # The daemon itself is responsible for removing stale sockets on startup.
-    [[ -S "$sock" ]] && return
 
     mkdir -p "$sock_dir"
 

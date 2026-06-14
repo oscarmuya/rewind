@@ -14,8 +14,13 @@ use tokio::{
 async fn main() -> Result<()> {
     let sock = socket_path()?;
 
-    // Remove stale socket file from a previous run.
     if sock.exists() {
+        // If we can connect, a daemon is already running -- nothing to do.
+        if UnixStream::connect(&sock).await.is_ok() {
+            eprintln!("[rewind-daemon] daemon already running, exiting");
+            return Ok(());
+        }
+        // Stale socket -- remove it and take over.
         std::fs::remove_file(&sock)
             .with_context(|| format!("could not remove stale socket: {}", sock.display()))?;
     }

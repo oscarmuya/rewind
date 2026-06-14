@@ -3,6 +3,9 @@
 # Install with:   rw init --install
 # Remove with:    rw init --uninstall
 
+export REWIND_SHELL_HOOK=1
+export REWIND_SHELL_HOOK_SHELL=bash
+
 __rewind_sock_dir() {
     printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/rewind"
 }
@@ -22,10 +25,6 @@ __rewind_json_string() {
 __rewind_daemon_start() {
     local sock_dir sock
     sock_dir="$(__rewind_sock_dir)"
-    sock="$(__rewind_sock_path)"
-
-    # If the socket exists, assume the daemon is already available.
-    [[ -S "$sock" ]] && return 0
 
     mkdir -p "$sock_dir"
 
@@ -126,6 +125,7 @@ __rewind_record() {
     (
         printf '%s\n' "$payload" | socat - UNIX-CONNECT:"$sock"
     ) >/dev/null 2>&1 &
+    disown $!
 }
 
 __rewind_install_hooks() {
