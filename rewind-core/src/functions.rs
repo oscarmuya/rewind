@@ -46,9 +46,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 /// symlinks to the physical path (e.g. `/data/projects/rewind`), which would
 /// cause cwd filter mismatches against commands recorded by the shell hook.
 pub fn get_cwd() -> PathBuf {
-    find_project_root(
-        &std::env::var("PWD")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default()),
-    )
+    std::env::var("PWD")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
 }
