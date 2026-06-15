@@ -1533,6 +1533,7 @@ dependencies = [
  "chrono",
  "dirs",
  "git2",
+ "nucleo-matcher",
  "rusqlite",
  "serde",
  "serde_json",

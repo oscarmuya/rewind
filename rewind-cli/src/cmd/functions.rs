@@ -11,6 +11,7 @@ use std::{
     os::unix::net::UnixStream,
     path::Path,
     process::{Command, ExitCode},
+    time::Instant,
 };
 
 pub fn exit_code_to_process_code(code: i32) -> ExitCode {
@@ -72,6 +73,21 @@ pub fn persist_direct(command: &str, cwd: &str, exit_code: i32, duration_ms: i64
     db::insert(&conn, &entry).context("could not insert command history entry")?;
 
     Ok(())
+}
+
+pub fn rerun_entry(entry: &Entry) -> Result<ExitCode> {
+    let start = Instant::now();
+    let exit_code = run_command(&entry.command, &entry.cwd)?;
+    let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
+
+    // Preferred path: daemon owns DB writes when it is running.
+    // Fallback path: write directly when the daemon is unavailable.
+    if send_to_daemon(&entry.command, &entry.cwd, exit_code, duration_ms).is_err() {
+        persist_direct(&entry.command, &entry.cwd, exit_code, duration_ms)
+            .context("could not persist rerun history")?;
+    }
+
+    Ok(exit_code_to_process_code(exit_code))
 }
 
 pub fn run_command(command: &str, cwd: &str) -> Result<i32> {

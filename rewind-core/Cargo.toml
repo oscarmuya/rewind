@@ -12,3 +12,4 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 git2 = { workspace = true }
+nucleo-matcher = { workspace = true }

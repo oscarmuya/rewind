@@ -5,8 +5,10 @@ use clap::Args as ClapArgs;
 use rewind_core::{
     db,
     functions::{find_project_root, get_cwd},
-    query,
+    fuzzy, query,
 };
+
+use crate::cmd::functions::rerun_entry;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -32,8 +34,10 @@ pub fn execute(args: self::Args) -> Result<()> {
     match (args.term, args.plain) {
         // Plain text search to stdout.
         (Some(term), true) => {
-            let entries = query::search_raw(&conn, &term, &project_root_str, args.limit)?;
-            for e in &entries {
+            // Fetch more than the final limit so nucleo has enough to re-rank from.
+            let entries = query::search_raw(&conn, &term, &project_root_str, args.limit * 10)?;
+            let filtered = fuzzy::search_fuzzy(&entries, &term, args.limit);
+            for e in &filtered {
                 println!("{}", e.command);
             }
         }
@@ -41,7 +45,10 @@ pub fn execute(args: self::Args) -> Result<()> {
         // Interactive TUI -- term is the pre-populated query or empty.
         (term, false) => {
             let initial = term.unwrap_or_default();
-            crate::tui::run(&conn, &initial)?;
+
+            if let Some(entry) = crate::tui::run(&conn, &initial)? {
+                rerun_entry(&entry)?;
+            }
         }
 
         // --plain with no term: just dump recent history.

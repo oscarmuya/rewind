@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use rewind_core::functions::{find_project_root, get_cwd};
-use rewind_core::{entry::Entry, query::recent};
+use rewind_core::{entry::Entry, fuzzy, query::recent};
 use rusqlite::Connection;
 use std::path::Path;
 
@@ -40,24 +40,11 @@ impl App {
     }
 
     fn refilter(&mut self) {
-        if self.query.is_empty() {
-            self.filtered = (0..self.entries.len()).collect();
+        self.filtered = if self.query.is_empty() {
+            (0..self.entries.len()).collect()
         } else {
-            let query = self.query.to_lowercase();
-
-            self.filtered = self
-                .entries
-                .iter()
-                .enumerate()
-                .filter_map(|(index, entry)| {
-                    entry
-                        .command
-                        .to_lowercase()
-                        .contains(&query)
-                        .then_some(index)
-                })
-                .collect();
-        }
+            fuzzy::search_fuzzy_indices(&self.entries, &self.query, TUI_ENTRY_LIMIT)
+        };
 
         self.list_state
             .select((!self.filtered.is_empty()).then_some(0));
@@ -106,7 +93,7 @@ impl App {
     }
 }
 
-pub fn run(conn: &Connection, initial_query: &str) -> Result<()> {
+pub fn run(conn: &Connection, initial_query: &str) -> Result<Option<Entry>> {
     let cwd = get_cwd();
     let project_root = find_project_root(Path::new(&cwd));
     let project_root_str = project_root.to_string_lossy().into_owned();
@@ -121,11 +108,7 @@ pub fn run(conn: &Connection, initial_query: &str) -> Result<()> {
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
 
-    if let Some(entry) = app.selected_entry() {
-        println!("{}", entry.command);
-    }
-
-    Ok(())
+    Ok(app.selected_entry().cloned())
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
