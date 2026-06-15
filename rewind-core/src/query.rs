@@ -150,4 +150,3 @@ pub fn search_raw(conn: &Connection, term: &str, limit: usize) -> Result<Vec<Ent
 pub fn recent(conn: &Connection, limit: usize) -> Result<Vec<Entry>> {
     fetch(conn, &Filter::new().limit(limit))
 }
-
