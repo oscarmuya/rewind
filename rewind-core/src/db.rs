@@ -1,10 +1,9 @@
+use crate::entry::Entry;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use dirs::data_dir;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::PathBuf;
-
-use crate::entry::Entry;
 
 /// Returns the path to the rewind data directory, creating it if needed.
 pub fn data_path() -> Result<PathBuf> {
@@ -29,32 +28,63 @@ pub fn open() -> Result<Connection> {
     Ok(conn)
 }
 
-/// Applies all schema migrations in order.
+/// The current schema version.
+const SCHEMA_VERSION: i64 = 2;
+
+/// Applies all schema migrations in order, using schema_version to track
+/// which migrations have already been applied. Each migration is additive
+/// and never destructive so existing data is always preserved.
 fn migrate(conn: &Connection) -> Result<()> {
+    // Bootstrap the version table and read the current version in one batch.
     conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS entries (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            command     TEXT    NOT NULL,
-            cwd         TEXT    NOT NULL,
-            git_repo    TEXT,
-            git_branch  TEXT,
-            exit_code   INTEGER,
-            duration_ms INTEGER,
-            started_at  TEXT    NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_entries_cwd        ON entries(cwd);
-        CREATE INDEX IF NOT EXISTS idx_entries_git_repo   ON entries(git_repo);
-        CREATE INDEX IF NOT EXISTS idx_entries_git_branch ON entries(git_branch);
-        CREATE INDEX IF NOT EXISTS idx_entries_started_at ON entries(started_at);
-        ",
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+         INSERT INTO schema_version (version) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM schema_version);",
     )
-    .context("migration failed")?;
+    .context("could not bootstrap schema_version")?;
+
+    let version: i64 = conn
+        .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
+        .context("could not read schema version")?;
+
+    // Migration 1: initial schema.
+    if version < 1 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS entries (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                command     TEXT    NOT NULL,
+                cwd         TEXT    NOT NULL,
+                git_repo    TEXT,
+                git_branch  TEXT,
+                exit_code   INTEGER,
+                duration_ms INTEGER,
+                started_at  TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_entries_cwd        ON entries(cwd);
+            CREATE INDEX IF NOT EXISTS idx_entries_git_repo   ON entries(git_repo);
+            CREATE INDEX IF NOT EXISTS idx_entries_git_branch ON entries(git_branch);
+            CREATE INDEX IF NOT EXISTS idx_entries_started_at ON entries(started_at);",
+        )
+        .context("migration 1 failed")?;
+    }
+
+    // Migration 2: add project_cwd column to scope commands to the git root
+    if version < 2 {
+        conn.execute_batch(
+            "ALTER TABLE entries ADD COLUMN project_cwd TEXT;
+             CREATE INDEX IF NOT EXISTS idx_entries_project_cwd ON entries(project_cwd);
+             UPDATE entries SET project_cwd = cwd WHERE project_cwd IS NULL;",
+        )
+        .context("migration 2 failed")?;
+    }
+
+    // Stamp the version after all migrations succeed.
+    if version < SCHEMA_VERSION {
+        conn.execute(
+            "UPDATE schema_version SET version = ?1",
+            params![SCHEMA_VERSION],
+        )
+        .context("could not update schema version")?;
+    }
 
     Ok(())
 }
@@ -62,11 +92,12 @@ fn migrate(conn: &Connection) -> Result<()> {
 /// Inserts a new entry and returns it with its assigned id.
 pub fn insert(conn: &Connection, entry: &Entry) -> Result<Entry> {
     conn.execute(
-        "INSERT INTO entries (command, cwd, git_repo, git_branch, exit_code, duration_ms, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO entries (command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             entry.command,
             entry.cwd,
+            entry.project_cwd,
             entry.git_repo,
             entry.git_branch,
             entry.exit_code,
@@ -96,7 +127,7 @@ pub fn complete(conn: &Connection, id: i64, exit_code: i32, duration_ms: i64) ->
 /// Fetches a single entry by id.
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Entry>> {
     conn.query_row(
-        "SELECT id, command, cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
          FROM entries WHERE id = ?1",
         params![id],
         row_to_entry,
@@ -107,7 +138,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Entry>> {
 
 /// Maps a rusqlite Row to an Entry.
 pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
-    let started_at_str: String = row.get(7)?;
+    let started_at_str: String = row.get(8)?;
     let started_at = started_at_str
         .parse::<DateTime<Utc>>()
         .unwrap_or_else(|_| Utc::now());
@@ -116,10 +147,12 @@ pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
         id: row.get(0)?,
         command: row.get(1)?,
         cwd: row.get(2)?,
-        git_repo: row.get(3)?,
-        git_branch: row.get(4)?,
-        exit_code: row.get(5)?,
-        duration_ms: row.get(6)?,
+        project_cwd: row.get(3)?,
+        git_repo: row.get(4)?,
+        git_branch: row.get(5)?,
+        exit_code: row.get(6)?,
+        duration_ms: row.get(7)?,
         started_at,
     })
 }
+

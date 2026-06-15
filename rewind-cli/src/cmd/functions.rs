@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use core::convert::Into;
 use rewind_core::{
     db,
     entry::{Entry, HookPayload},
@@ -53,7 +54,8 @@ pub fn persist_direct(command: &str, cwd: &str, exit_code: i32, duration_ms: i64
     let entry = Entry {
         id: 0,
         command: command.to_owned(),
-        cwd: project_root_str,
+        cwd: cwd.into(),
+        project_cwd: project_root_str,
         git_repo,
         git_branch,
         exit_code: Some(exit_code),

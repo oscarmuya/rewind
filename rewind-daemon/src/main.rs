@@ -71,7 +71,8 @@ async fn handle(stream: UnixStream) -> Result<()> {
         let entry = Entry {
             id: 0,
             command: payload.command,
-            cwd: project_root.to_string_lossy().into_owned(),
+            cwd: payload.cwd,
+            project_cwd: project_root.to_string_lossy().into_owned(),
             git_repo,
             git_branch,
             exit_code: Some(payload.exit_code),
