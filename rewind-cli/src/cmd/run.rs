@@ -17,7 +17,12 @@ pub struct Args {
 pub fn execute(args: Args) -> Result<ExitCode> {
     let cwd = get_cwd().to_string_lossy().into_owned();
 
-    let command_str = args.cmd.join(" ");
+    let command_str = args
+        .cmd
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
 
     // Execute the command first; persistence should not affect command execution.
     let start = Instant::now();
@@ -32,4 +37,9 @@ pub fn execute(args: Args) -> Result<ExitCode> {
     }
 
     Ok(exit_code_to_process_code(exit_code))
+}
+
+/// Wrap in single quotes, escaping any single quotes within
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
 }
