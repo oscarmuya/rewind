@@ -8,6 +8,7 @@ use crate::entry::Entry;
 #[derive(Debug, Default)]
 pub struct Filter {
     pub cwd: Option<String>,
+    pub project_cwd: Option<String>,
     pub git_repo: Option<String>,
     pub git_branch: Option<String>,
     /// If true, only return entries where exit_code = 0.
@@ -24,6 +25,11 @@ impl Filter {
 
     pub fn cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn project_cwd(mut self, project_cwd: impl Into<String>) -> Self {
+        self.project_cwd = Some(project_cwd.into());
         self
     }
 
@@ -64,6 +70,11 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
         binds.push(Box::new(cwd.clone()));
     }
 
+    if let Some(project_cwd) = &filter.project_cwd {
+        conditions.push("project_cwd = ?".to_string());
+        binds.push(Box::new(project_cwd.clone()));
+    }
+
     if let Some(repo) = &filter.git_repo {
         conditions.push("git_repo = ?".to_string());
         binds.push(Box::new(repo.clone()));
@@ -94,7 +105,7 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
         .unwrap_or_default();
 
     let sql = format!(
-        "SELECT id, command, cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
          FROM entries
          {where_clause}
          ORDER BY started_at DESC
@@ -118,7 +129,7 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
 pub fn search_raw(conn: &Connection, term: &str, limit: usize) -> Result<Vec<Entry>> {
     let pattern = format!("%{term}%");
     let sql = "
-        SELECT id, command, cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
         FROM entries
         WHERE command LIKE ?1
         ORDER BY started_at DESC

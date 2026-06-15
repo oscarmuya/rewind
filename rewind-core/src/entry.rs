@@ -13,6 +13,9 @@ pub struct Entry {
     /// Absolute path of the working directory at the time of execution.
     pub cwd: String,
 
+    /// Absolute path of the project directory at the time of execution.
+    pub project_cwd: String,
+
     /// Git repo root if cwd is inside a git repository.
     pub git_repo: Option<String>,
 
@@ -33,6 +36,7 @@ impl Entry {
     pub fn new(
         command: impl Into<String>,
         cwd: impl Into<String>,
+        project_cwd: impl Into<String>,
         git_repo: Option<String>,
         git_branch: Option<String>,
     ) -> Self {
@@ -40,6 +44,7 @@ impl Entry {
             id: 0,
             command: command.into(),
             cwd: cwd.into(),
+            project_cwd: project_cwd.into(),
             git_repo,
             git_branch,
             exit_code: None,

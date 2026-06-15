@@ -1,3 +1,4 @@
+pub mod functions;
 pub mod init;
 pub mod recent;
 pub mod run;
