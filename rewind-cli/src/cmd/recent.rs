@@ -47,7 +47,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
 
     let (git_repo, git_branch) = resolve_git(&cwd);
 
-    let mut filter = Filter::new().limit(args.limit);
+    let mut filter = Filter::new().limit(args.limit).cwd(&cwd);
 
     if args.repo
         && let Some(repo) = git_repo
