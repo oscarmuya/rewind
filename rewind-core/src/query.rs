@@ -126,27 +126,36 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
 
 /// Fetches all entries whose command contains `term` (case-insensitive substring).
 /// This is the pre-filter step before nucleo fuzzy ranking in the TUI.
-pub fn search_raw(conn: &Connection, term: &str, limit: usize) -> Result<Vec<Entry>> {
+pub fn search_raw(
+    conn: &Connection,
+    term: &str,
+    project_cwd: &str,
+    limit: usize,
+) -> Result<Vec<Entry>> {
     let pattern = format!("%{term}%");
     let sql = "
         SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
         FROM entries
-        WHERE command LIKE ?1
+        WHERE project_cwd = ?1
+          AND command LIKE ?2
         ORDER BY started_at DESC
-        LIMIT ?2
+        LIMIT ?3
     ";
 
     let mut stmt = conn.prepare(sql).context("prepare search failed")?;
     let rows = stmt
-        .query_map(rusqlite::params![pattern, limit as i64], row_to_entry)
+        .query_map(
+            rusqlite::params![project_cwd, pattern, limit as i64],
+            row_to_entry,
+        )
         .context("query search failed")?;
 
     rows.map(|r| r.context("row mapping failed"))
         .collect::<Result<Vec<_>>>()
 }
 
-/// Returns the N most recently used unique commands in the given directory,
+/// Returns the N most recent commands in the given project,
 /// useful for the TUI default view when no search term is typed.
-pub fn recent(conn: &Connection, limit: usize) -> Result<Vec<Entry>> {
-    fetch(conn, &Filter::new().limit(limit))
+pub fn recent(conn: &Connection, project_cwd: &str, limit: usize) -> Result<Vec<Entry>> {
+    fetch(conn, &Filter::new().project_cwd(project_cwd).limit(limit))
 }

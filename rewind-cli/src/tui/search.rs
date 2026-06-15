@@ -1,5 +1,7 @@
+use super::shared::status_parts;
 use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyModifiers};
+use nucleo_matcher::{Config, Matcher};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
@@ -7,10 +9,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
-use rewind_core::{entry::Entry, query::recent};
+use rewind_core::{entry::Entry, fuzzy, query::recent};
 use rusqlite::Connection;
-
-use super::shared::status_parts;
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
 
@@ -19,10 +19,12 @@ struct App {
     entries: Vec<Entry>,
     filtered: Vec<usize>, // Indices into entries.
     list_state: ListState,
+    matcher: Matcher,
 }
 
 impl App {
     fn new(entries: Vec<Entry>) -> Self {
+        let matcher = Matcher::new(Config::DEFAULT);
         let filtered = (0..entries.len()).collect::<Vec<_>>();
         let mut list_state = ListState::default();
 
@@ -35,28 +37,21 @@ impl App {
             entries,
             filtered,
             list_state,
+            matcher,
         }
     }
 
     fn refilter(&mut self) {
-        if self.query.is_empty() {
-            self.filtered = (0..self.entries.len()).collect();
+        self.filtered = if self.query.is_empty() {
+            (0..self.entries.len()).collect()
         } else {
-            let query = self.query.to_lowercase();
-
-            self.filtered = self
-                .entries
-                .iter()
-                .enumerate()
-                .filter_map(|(index, entry)| {
-                    entry
-                        .command
-                        .to_lowercase()
-                        .contains(&query)
-                        .then_some(index)
-                })
-                .collect();
-        }
+            fuzzy::search_fuzzy_indices(
+                &mut self.matcher,
+                &self.entries,
+                &self.query,
+                TUI_ENTRY_LIMIT,
+            )
+        };
 
         self.list_state
             .select((!self.filtered.is_empty()).then_some(0));
@@ -105,8 +100,12 @@ impl App {
     }
 }
 
-pub fn run(conn: &Connection, initial_query: &str) -> Result<()> {
-    let entries = recent(conn, TUI_ENTRY_LIMIT)?;
+pub fn run(
+    conn: &Connection,
+    project_root_str: &str,
+    initial_query: &str,
+) -> Result<Option<Entry>> {
+    let entries = recent(conn, project_root_str, TUI_ENTRY_LIMIT)?;
     let mut app = App::new(entries);
 
     if !initial_query.is_empty() {
@@ -116,11 +115,7 @@ pub fn run(conn: &Connection, initial_query: &str) -> Result<()> {
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
 
-    if let Some(entry) = app.selected_entry() {
-        println!("{}", entry.command);
-    }
-
-    Ok(())
+    Ok(app.selected_entry().cloned())
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{Datelike, Local};
 use clap::Args as ClapArgs;
 use rewind_core::{
@@ -11,12 +11,9 @@ use std::{
     io::{self, Write},
     path::Path,
     process::ExitCode,
-    time::Instant,
 };
 
-use crate::cmd::functions::{
-    exit_code_to_process_code, persist_direct, run_command, send_to_daemon,
-};
+use crate::cmd::functions::rerun_entry;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -137,21 +134,6 @@ pub fn print_entries(entries: &[Entry]) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn rerun_entry(entry: &Entry) -> Result<ExitCode> {
-    let start = Instant::now();
-    let exit_code = run_command(&entry.command, &entry.cwd)?;
-    let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
-
-    // Preferred path: daemon owns DB writes when it is running.
-    // Fallback path: write directly when the daemon is unavailable.
-    if send_to_daemon(&entry.command, &entry.cwd, exit_code, duration_ms).is_err() {
-        persist_direct(&entry.command, &entry.cwd, exit_code, duration_ms)
-            .context("could not persist rerun history")?;
-    }
-
-    Ok(exit_code_to_process_code(exit_code))
 }
 
 fn date_heading(entry: &Entry) -> String {
