@@ -4,7 +4,7 @@ use clap::Args as ClapArgs;
 use rewind_core::{
     db,
     entry::Entry,
-    functions::{find_project_root, resolve_git},
+    functions::{get_cwd, resolve_git},
     query::{self, Filter},
 };
 use std::{
@@ -14,7 +14,7 @@ use std::{
     time::Instant,
 };
 
-use crate::cmd::functions::{exit_code_to_process_code, get_cwd, persist_direct, send_to_daemon};
+use crate::cmd::functions::{exit_code_to_process_code, persist_direct, send_to_daemon};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -47,11 +47,8 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let cwd = get_cwd();
     let cwd_str = cwd.to_string_lossy().into_owned();
 
-    let project_root = find_project_root(&cwd);
-    let project_root_str = project_root.to_string_lossy().into_owned();
-
     let (git_repo, git_branch) = resolve_git(&cwd_str);
-    let mut filter = Filter::new().limit(args.limit).cwd(&project_root_str);
+    let mut filter = Filter::new().limit(args.limit).cwd(&cwd_str);
 
     if args.repo
         && let Some(repo) = git_repo

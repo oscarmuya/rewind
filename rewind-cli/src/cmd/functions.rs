@@ -5,12 +5,7 @@ use rewind_core::{
     functions::{find_project_root, resolve_git},
     socket::socket_path,
 };
-use std::{
-    io::Write,
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{io::Write, os::unix::net::UnixStream, path::Path, process::ExitCode};
 
 pub fn exit_code_to_process_code(code: i32) -> ExitCode {
     match u8::try_from(code) {
@@ -70,17 +65,4 @@ pub fn persist_direct(command: &str, cwd: &str, exit_code: i32, duration_ms: i64
     db::insert(&conn, &entry).context("could not insert command history entry")?;
 
     Ok(())
-}
-
-/// Returns the current working directory as a [`PathBuf`].
-///
-/// Prefers `$PWD` from the environment over [`std::env::current_dir`] so that
-/// logical symlink paths are preserved. The shell sets `$PWD` to the logical
-/// path (e.g. `/home/oscar/projects/rewind`), while `current_dir` resolves
-/// symlinks to the physical path (e.g. `/data/projects/rewind`), which would
-/// cause cwd filter mismatches against commands recorded by the shell hook.
-pub fn get_cwd() -> PathBuf {
-    std::env::var("PWD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
 }

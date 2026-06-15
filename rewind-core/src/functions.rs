@@ -37,3 +37,18 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
         }
     }
 }
+
+/// Returns the current working directory as a [`PathBuf`].
+///
+/// Prefers `$PWD` from the environment over [`std::env::current_dir`] so that
+/// logical symlink paths are preserved. The shell sets `$PWD` to the logical
+/// path (e.g. `/home/oscar/projects/rewind`), while `current_dir` resolves
+/// symlinks to the physical path (e.g. `/data/projects/rewind`), which would
+/// cause cwd filter mismatches against commands recorded by the shell hook.
+pub fn get_cwd() -> PathBuf {
+    find_project_root(
+        &std::env::var("PWD")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default()),
+    )
+}

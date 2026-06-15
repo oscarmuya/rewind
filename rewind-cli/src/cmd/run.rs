@@ -5,7 +5,8 @@ use std::{
     time::Instant,
 };
 
-use crate::cmd::functions::{exit_code_to_process_code, get_cwd, persist_direct, send_to_daemon};
+use crate::cmd::functions::{exit_code_to_process_code, persist_direct, send_to_daemon};
+use rewind_core::functions::get_cwd;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
