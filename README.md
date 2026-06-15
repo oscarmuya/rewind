@@ -189,6 +189,7 @@ Filter recent history by Git context or status:
 
 ```sh
 rw --repo
+rw --cwd
 rw --branch
 rw --ok
 rw --fail

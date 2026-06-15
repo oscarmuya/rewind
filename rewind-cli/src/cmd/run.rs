@@ -1,11 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
-use std::{
-    process::{Command, ExitCode},
-    time::Instant,
-};
+use std::{process::ExitCode, time::Instant};
 
-use crate::cmd::functions::{exit_code_to_process_code, persist_direct, send_to_daemon};
+use crate::cmd::functions::{
+    exit_code_to_process_code, persist_direct, run_command, send_to_daemon,
+};
 use rewind_core::functions::get_cwd;
 
 #[derive(ClapArgs, Debug)]
@@ -22,13 +21,8 @@ pub fn execute(args: Args) -> Result<ExitCode> {
 
     // Execute the command first; persistence should not affect command execution.
     let start = Instant::now();
-    let status = Command::new(&args.cmd[0])
-        .args(&args.cmd[1..])
-        .status()
-        .with_context(|| format!("could not spawn `{}`", args.cmd[0]))?;
-
+    let exit_code = run_command(&command_str, &cwd)?;
     let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
-    let exit_code = status.code().unwrap_or(1);
 
     // Preferred path: daemon owns DB writes when it is running.
     // Fallback path: write directly when the daemon is unavailable.

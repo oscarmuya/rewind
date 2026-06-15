@@ -6,7 +6,12 @@ use rewind_core::{
     functions::{find_project_root, resolve_git},
     socket::socket_path,
 };
-use std::{io::Write, os::unix::net::UnixStream, path::Path, process::ExitCode};
+use std::{
+    io::Write,
+    os::unix::net::UnixStream,
+    path::Path,
+    process::{Command, ExitCode},
+};
 
 pub fn exit_code_to_process_code(code: i32) -> ExitCode {
     match u8::try_from(code) {
@@ -67,4 +72,35 @@ pub fn persist_direct(command: &str, cwd: &str, exit_code: i32, duration_ms: i64
     db::insert(&conn, &entry).context("could not insert command history entry")?;
 
     Ok(())
+}
+
+pub fn run_command(command: &str, cwd: &str) -> Result<i32> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    let shell_name = std::env::var("REWIND_SHELL_HOOK_SHELL").unwrap_or_else(|_| {
+        Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sh")
+            .to_string()
+    });
+
+    // We Use -i (interactive) to source ~/.zshrc / ~/.bashrc so aliases work.
+    // zsh also needs -s to suppress the prompt being printed.
+    let args: &[&str] = match shell_name.as_str() {
+        "zsh" => &["-isc"],
+        "bash" => &["-ic"],
+        "fish" => &["-c"],
+        _ => &["-ic"],
+    };
+
+    let status = Command::new(&shell)
+        .args(args)
+        .arg(command)
+        .current_dir(cwd)
+        .status()
+        .with_context(|| format!("could not run `{}` with `{shell}`", command))?;
+
+    let exit_code = status.code().unwrap_or(1);
+
+    Ok(exit_code)
 }

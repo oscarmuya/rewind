@@ -10,17 +10,23 @@ use rewind_core::{
 use std::{
     io::{self, Write},
     path::Path,
-    process::{Command, ExitCode},
+    process::ExitCode,
     time::Instant,
 };
 
-use crate::cmd::functions::{exit_code_to_process_code, persist_direct, send_to_daemon};
+use crate::cmd::functions::{
+    exit_code_to_process_code, persist_direct, run_command, send_to_daemon,
+};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
     /// Number of entries to show.
     #[arg(short, long, default_value = "500")]
     pub limit: usize,
+
+    /// Filter by current working directory
+    #[arg(long)]
+    pub cwd: bool,
 
     /// Filter by git repository (uses current repo if inside one).
     #[arg(long)]
@@ -54,6 +60,10 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let mut filter = Filter::new()
         .limit(args.limit)
         .project_cwd(&project_root_str);
+
+    if args.cwd {
+        filter = filter.cwd(&cwd_str);
+    }
 
     if args.repo
         && let Some(repo) = git_repo
@@ -130,34 +140,9 @@ pub fn print_entries(entries: &[Entry]) -> Result<()> {
 }
 
 fn rerun_entry(entry: &Entry) -> Result<ExitCode> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-    let shell_name = std::env::var("REWIND_SHELL_HOOK_SHELL").unwrap_or_else(|_| {
-        Path::new(&shell)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("sh")
-            .to_string()
-    });
-
-    // We Use -i (interactive) to source ~/.zshrc / ~/.bashrc so aliases work.
-    // zsh also needs -s to suppress the prompt being printed.
-    let args: &[&str] = match shell_name.as_str() {
-        "zsh" => &["-isc"],
-        "bash" => &["-ic"],
-        "fish" => &["-c"],
-        _ => &["-ic"],
-    };
-
     let start = Instant::now();
-    let status = Command::new(&shell)
-        .args(args)
-        .arg(&entry.command)
-        .current_dir(&entry.cwd)
-        .status()
-        .with_context(|| format!("could not rerun `{}` with `{shell}`", entry.command))?;
-
+    let exit_code = run_command(&entry.command, &entry.cwd)?;
     let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
-    let exit_code = status.code().unwrap_or(1);
 
     // Preferred path: daemon owns DB writes when it is running.
     // Fallback path: write directly when the daemon is unavailable.
