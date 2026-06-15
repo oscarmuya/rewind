@@ -4,19 +4,22 @@ use clap::Args as ClapArgs;
 use rewind_core::{
     db,
     entry::Entry,
-    functions::resolve_git,
+    functions::{find_project_root, resolve_git},
     query::{self, Filter},
 };
 use std::{
     io::{self, Write},
+    path::Path,
     process::{Command, ExitCode},
     time::Instant,
 };
 
+use crate::cmd::functions::{exit_code_to_process_code, get_cwd, persist_direct, send_to_daemon};
+
 #[derive(ClapArgs, Debug)]
 pub struct Args {
     /// Number of entries to show.
-    #[arg(short, long, default_value = "50")]
+    #[arg(short, long, default_value = "500")]
     pub limit: usize,
 
     /// Filter by git repository (uses current repo if inside one).
@@ -41,13 +44,14 @@ pub struct Args {
 }
 
 pub fn execute(args: self::Args) -> Result<ExitCode> {
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let cwd = get_cwd();
+    let cwd_str = cwd.to_string_lossy().into_owned();
 
-    let (git_repo, git_branch) = resolve_git(&cwd);
+    let project_root = find_project_root(&cwd);
+    let project_root_str = project_root.to_string_lossy().into_owned();
 
-    let mut filter = Filter::new().limit(args.limit).cwd(&cwd);
+    let (git_repo, git_branch) = resolve_git(&cwd_str);
+    let mut filter = Filter::new().limit(args.limit).cwd(&project_root_str);
 
     if args.repo
         && let Some(repo) = git_repo
@@ -125,10 +129,26 @@ pub fn print_entries(entries: &[Entry]) -> Result<()> {
 
 fn rerun_entry(entry: &Entry) -> Result<ExitCode> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-    let start = Instant::now();
+    let shell_name = std::env::var("REWIND_SHELL_HOOK_SHELL").unwrap_or_else(|_| {
+        Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sh")
+            .to_string()
+    });
 
+    // We Use -i (interactive) to source ~/.zshrc / ~/.bashrc so aliases work.
+    // zsh also needs -s to suppress the prompt being printed.
+    let args: &[&str] = match shell_name.as_str() {
+        "zsh" => &["-isc"],
+        "bash" => &["-ic"],
+        "fish" => &["-c"],
+        _ => &["-ic"],
+    };
+
+    let start = Instant::now();
     let status = Command::new(&shell)
-        .arg("-lc")
+        .args(args)
         .arg(&entry.command)
         .current_dir(&entry.cwd)
         .status()
@@ -137,37 +157,14 @@ fn rerun_entry(entry: &Entry) -> Result<ExitCode> {
     let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
     let exit_code = status.code().unwrap_or(1);
 
-    persist_rerun(entry, exit_code, duration_ms).context("could not persist rerun history")?;
+    // Preferred path: daemon owns DB writes when it is running.
+    // Fallback path: write directly when the daemon is unavailable.
+    if send_to_daemon(&entry.command, &entry.cwd, exit_code, duration_ms).is_err() {
+        persist_direct(&entry.command, &entry.cwd, exit_code, duration_ms)
+            .context("could not persist rerun history")?;
+    }
 
     Ok(exit_code_to_process_code(exit_code))
-}
-
-fn persist_rerun(entry: &Entry, exit_code: i32, duration_ms: i64) -> Result<()> {
-    let (git_repo, git_branch) = resolve_git(&entry.cwd);
-    let conn = db::open().context("could not open database")?;
-
-    db::insert(
-        &conn,
-        &Entry {
-            id: 0,
-            command: entry.command.clone(),
-            cwd: entry.cwd.clone(),
-            git_repo,
-            git_branch,
-            exit_code: Some(exit_code),
-            duration_ms: Some(duration_ms),
-            started_at: chrono::Utc::now(),
-        },
-    )?;
-
-    Ok(())
-}
-
-fn exit_code_to_process_code(code: i32) -> ExitCode {
-    match u8::try_from(code) {
-        Ok(code) => ExitCode::from(code),
-        Err(_) => ExitCode::FAILURE,
-    }
 }
 
 fn date_heading(entry: &Entry) -> String {
