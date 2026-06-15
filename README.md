@@ -235,7 +235,7 @@ In the TUI:
 
 - type to filter commands
 - use `Up`/`Down` or `k`/`j` to move
-- press `Enter` to print the selected command
+- press `Enter` to rerun the selected command
 - press `Esc` or `Ctrl-C` to exit without selecting
 
 ## Data Files
@@ -284,7 +284,3 @@ tests/shell/fish.sh
 - Shell integrations require `python3` and `socat`.
 - The daemon communicates over a Unix domain socket, so Windows is not currently
   supported.
-- Search is local to the SQLite database and currently uses case-insensitive
-  substring matching.
-- `rw run` executes commands directly, not through a shell, unless you explicitly
-  call a shell yourself.
