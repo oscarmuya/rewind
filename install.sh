@@ -178,12 +178,24 @@ tar -xzf "$tmp/$asset" -C "$tmp"
 [ -f "$tmp/$package/rw" ]        || fail "archive is missing rw"
 [ -f "$tmp/$package/rw-daemon" ] || fail "archive is missing rw-daemon"
 
+# Kill the daemon if running to avoid "Text file busy" on overwrite
+if [ -f "$target_dir/rw-daemon" ]; then
+    pkill -x rw-daemon 2>/dev/null || true
+fi
+
 mkdir -p "$target_dir"
+# Remove before copy to avoid "Text file busy" when the daemon is running
+rm -f "$target_dir/rw" "$target_dir/rw-daemon"
 cp "$tmp/$package/rw"        "$target_dir/rw"
 cp "$tmp/$package/rw-daemon" "$target_dir/rw-daemon"
 chmod 755 "$target_dir/rw" "$target_dir/rw-daemon"
 
 info "installed rw and rw-daemon to $target_dir"
+
+# Restart the daemon if it was stopped for the update
+# Restart daemon in a subshell so it detaches cleanly and the shell does
+# not print a job notification.
+( "$target_dir/rw-daemon" >/dev/null 2>&1 </dev/null & )
 
 case ":$PATH:" in
     *":$target_dir:"*) ;;
