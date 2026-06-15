@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Resolves the git repo root and current branch for a given directory.
 /// Returns (None, None) if the path is not inside a git repo.
@@ -20,4 +20,20 @@ pub fn resolve_git(cwd: &str) -> (Option<String>, Option<String>) {
     };
 
     (repo_root, branch)
+}
+
+/// Walks up the directory tree from `cwd` looking for a `.git` entry.
+/// Returns the first directory containing `.git` (the project root), or
+/// falls back to `cwd` itself if no git repository is found.
+pub fn find_project_root(cwd: &Path) -> PathBuf {
+    let mut dir = cwd;
+    loop {
+        if dir.join(".git").exists() {
+            return dir.to_path_buf();
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            Option::None => return cwd.to_path_buf(),
+        }
+    }
 }
