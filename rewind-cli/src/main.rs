@@ -58,10 +58,7 @@ impl Commands {
         match self {
             Self::Run(args) => cmd::run::execute(args),
 
-            Self::Search(args) => {
-                cmd::search::execute(args)?;
-                Ok(ExitCode::SUCCESS)
-            }
+            Self::Search(args) => cmd::search::execute(args),
 
             Self::Recent(args) => cmd::recent::execute(args),
 

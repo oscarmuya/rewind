@@ -7,7 +7,8 @@ use nucleo_matcher::{
 /// Runs a fuzzy search over history using nucleo as the fuzzy ranking layer on top.
 /// Returns entries ordered by fuzzy match score descending.
 pub fn search_fuzzy<'a>(candidates: &'a [Entry], term: &str, limit: usize) -> Vec<&'a Entry> {
-    let indices = search_fuzzy_indices(candidates, term, limit);
+    let mut matcher = Matcher::new(Config::DEFAULT);
+    let indices = search_fuzzy_indices(&mut matcher, candidates, term, limit);
 
     indices
         .into_iter()
@@ -19,8 +20,12 @@ pub fn search_fuzzy<'a>(candidates: &'a [Entry], term: &str, limit: usize) -> Ve
 ///
 /// The returned indexes refer to positions in `candidates`, allowing callers
 /// to keep UI state as indexes without cloning or moving `Entry` values.
-pub fn search_fuzzy_indices(candidates: &[Entry], term: &str, limit: usize) -> Vec<usize> {
-    let mut matcher = Matcher::new(Config::DEFAULT);
+pub fn search_fuzzy_indices(
+    matcher: &mut Matcher,
+    candidates: &[Entry],
+    term: &str,
+    limit: usize,
+) -> Vec<usize> {
     let pattern = Pattern::new(
         term,
         CaseMatching::Smart,
@@ -37,7 +42,7 @@ pub fn search_fuzzy_indices(candidates: &[Entry], term: &str, limit: usize) -> V
             buf.clear();
 
             pattern
-                .score(Utf32Str::new(&entry.command, &mut buf), &mut matcher)
+                .score(Utf32Str::new(&entry.command, &mut buf), matcher)
                 .map(|score| (score, index))
         })
         .collect();

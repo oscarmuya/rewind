@@ -1,6 +1,7 @@
 use super::shared::status_parts;
 use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyModifiers};
+use nucleo_matcher::{Config, Matcher};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
@@ -8,10 +9,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
-use rewind_core::functions::{find_project_root, get_cwd};
 use rewind_core::{entry::Entry, fuzzy, query::recent};
 use rusqlite::Connection;
-use std::path::Path;
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
 
@@ -20,10 +19,12 @@ struct App {
     entries: Vec<Entry>,
     filtered: Vec<usize>, // Indices into entries.
     list_state: ListState,
+    matcher: Matcher,
 }
 
 impl App {
     fn new(entries: Vec<Entry>) -> Self {
+        let matcher = Matcher::new(Config::DEFAULT);
         let filtered = (0..entries.len()).collect::<Vec<_>>();
         let mut list_state = ListState::default();
 
@@ -36,6 +37,7 @@ impl App {
             entries,
             filtered,
             list_state,
+            matcher,
         }
     }
 
@@ -43,7 +45,12 @@ impl App {
         self.filtered = if self.query.is_empty() {
             (0..self.entries.len()).collect()
         } else {
-            fuzzy::search_fuzzy_indices(&self.entries, &self.query, TUI_ENTRY_LIMIT)
+            fuzzy::search_fuzzy_indices(
+                &mut self.matcher,
+                &self.entries,
+                &self.query,
+                TUI_ENTRY_LIMIT,
+            )
         };
 
         self.list_state
@@ -93,12 +100,12 @@ impl App {
     }
 }
 
-pub fn run(conn: &Connection, initial_query: &str) -> Result<Option<Entry>> {
-    let cwd = get_cwd();
-    let project_root = find_project_root(Path::new(&cwd));
-    let project_root_str = project_root.to_string_lossy().into_owned();
-
-    let entries = recent(conn, &project_root_str, TUI_ENTRY_LIMIT)?;
+pub fn run(
+    conn: &Connection,
+    project_root_str: &str,
+    initial_query: &str,
+) -> Result<Option<Entry>> {
+    let entries = recent(conn, project_root_str, TUI_ENTRY_LIMIT)?;
     let mut app = App::new(entries);
 
     if !initial_query.is_empty() {

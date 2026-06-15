@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, process::ExitCode};
 
 use anyhow::Result;
 use clap::Args as ClapArgs;
@@ -24,7 +24,7 @@ pub struct Args {
     pub limit: usize,
 }
 
-pub fn execute(args: self::Args) -> Result<()> {
+pub fn execute(args: self::Args) -> Result<ExitCode> {
     let conn = db::open()?;
 
     let cwd = get_cwd();
@@ -34,8 +34,8 @@ pub fn execute(args: self::Args) -> Result<()> {
     match (args.term, args.plain) {
         // Plain text search to stdout.
         (Some(term), true) => {
-            // Fetch more than the final limit so nucleo has enough to re-rank from.
-            let entries = query::search_raw(&conn, &term, &project_root_str, args.limit * 10)?;
+            // We fetch all the recent and perform fuzzy search on the results
+            let entries = query::recent(&conn, &project_root_str, args.limit * 10)?;
             let filtered = fuzzy::search_fuzzy(&entries, &term, args.limit);
             for e in &filtered {
                 println!("{}", e.command);
@@ -46,8 +46,8 @@ pub fn execute(args: self::Args) -> Result<()> {
         (term, false) => {
             let initial = term.unwrap_or_default();
 
-            if let Some(entry) = crate::tui::run(&conn, &initial)? {
-                rerun_entry(&entry)?;
+            if let Some(entry) = crate::tui::run(&conn, &project_root_str, &initial)? {
+                return rerun_entry(&entry);
             }
         }
 
@@ -60,5 +60,5 @@ pub fn execute(args: self::Args) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
