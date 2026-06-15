@@ -1,3 +1,4 @@
+use super::shared::status_parts;
 use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use ratatui::{
@@ -7,10 +8,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState, Paragraph},
 };
+use rewind_core::functions::{find_project_root, get_cwd};
 use rewind_core::{entry::Entry, query::recent};
 use rusqlite::Connection;
-
-use super::shared::status_parts;
+use std::path::Path;
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
 
@@ -106,7 +107,11 @@ impl App {
 }
 
 pub fn run(conn: &Connection, initial_query: &str) -> Result<()> {
-    let entries = recent(conn, TUI_ENTRY_LIMIT)?;
+    let cwd = get_cwd();
+    let project_root = find_project_root(Path::new(&cwd));
+    let project_root_str = project_root.to_string_lossy().into_owned();
+
+    let entries = recent(conn, &project_root_str, TUI_ENTRY_LIMIT)?;
     let mut app = App::new(entries);
 
     if !initial_query.is_empty() {
