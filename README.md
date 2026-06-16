@@ -1,9 +1,16 @@
-# rewind
+<p align="center">
+    <a href="https://oscardev.site">
+        <img src="https://github.com/user-attachments/assets/eca3754c-4766-4253-bbb4-bc334653a941" width="300"></a><!-- </a> being on the same line as the <img> tag is intentional! -->
+    <br>
 
-
-[![CI](https://github.com/oscarmuya/rewind/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oscarmuya/rewind/actions/workflows/ci.yml)
-[![Release](https://github.com/oscarmuya/rewind/actions/workflows/release.yml/badge.svg)](https://github.com/oscarmuya/rewind/actions/workflows/release.yml)
-[![Latest Release](https://img.shields.io/github/v/release/oscarmuya/rewind?sort=semver)](https://github.com/oscarmuya/rewind/releases/latest)
+<a href="https://github.com/oscarmuya/rewind/actions/workflows/ci.yml">
+<img src="https://img.shields.io/github/actions/workflow/status/oscarmuya/rewind/ci.yml?branch=main&style=flat&labelColor=1C2C2E&color=BEC5C9&logo=GitHub%20Actions&logoColor=BEC5C9&label=ci"></a>
+      <a href="https://github.com/oscarmuya/rewind/actions/workflows/release.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/oscarmuya/rewind/release.yml?style=flat&labelColor=1C2C2E&color=BEC5C9&logo=GitHub%20Actions&logoColor=BEC5C9&label=release"></a>
+<a href="https://github.com/oscarmuya/rewind/releases/latest">
+    <img src="https://img.shields.io/github/v/release/oscarmuya/rewind?sort=semver&style=flat&labelColor=1C2C2E&color=BEC5C9&logo=GitHub&logoColor=BEC5C9&label=latest"></a>
+<br>
+</p>
 
 `rewind` is a per-project command history tool for your shell. It records the
 commands you run, where you ran them, their Git repository and branch context,
@@ -228,7 +235,7 @@ In the TUI:
 
 - type to filter commands
 - use `Up`/`Down` or `k`/`j` to move
-- press `Enter` to print the selected command
+- press `Enter` to rerun the selected command
 - press `Esc` or `Ctrl-C` to exit without selecting
 
 ## Data Files
@@ -277,7 +284,3 @@ tests/shell/fish.sh
 - Shell integrations require `python3` and `socat`.
 - The daemon communicates over a Unix domain socket, so Windows is not currently
   supported.
-- Search is local to the SQLite database and currently uses case-insensitive
-  substring matching.
-- `rw run` executes commands directly, not through a shell, unless you explicitly
-  call a shell yourself.
