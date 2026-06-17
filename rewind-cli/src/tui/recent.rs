@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::Local;
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
@@ -10,14 +9,18 @@ use crossterm::{
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    style::Style,
+    widgets::{List, ListState, Paragraph},
 };
 use rewind_core::entry::Entry;
 use std::io;
 
-use super::shared::{date_heading, empty_history_item, status_parts};
+use crate::tui::shared::{Junction, separator_line, top_bar};
+
+use super::shared::{
+    command_item, context_bar, date_heading, date_heading_item, empty_history_item, list_block,
+    selected_item_style,
+};
 
 struct MouseCaptureGuard;
 
@@ -113,11 +116,8 @@ impl App {
             return false;
         }
 
-        let top = self.list_area.y.saturating_add(1);
-        let bottom = self
-            .list_area
-            .y
-            .saturating_add(self.list_area.height.saturating_sub(1));
+        let top = self.list_area.y;
+        let bottom = self.list_area.y.saturating_add(self.list_area.height);
 
         if mouse.row < top || mouse.row >= bottom {
             return false;
@@ -198,66 +198,49 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 fn ui(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(3), // top bar
+            Constraint::Length(1), // context
+            Constraint::Length(1), // separator line
+            Constraint::Min(1),    // list
+            Constraint::Length(1), // blank space
+        ])
         .split(frame.area());
 
-    app.list_area = chunks[0];
+    // render the top bar
+    let top = Paragraph::new(top_bar(chunks[0].width));
+    frame.render_widget(top, chunks[0]);
 
+    // render the details bar (context)
+    let detail = Paragraph::new(context_bar(app.selected_entry())).style(Style::default());
+    frame.render_widget(detail, chunks[1]);
+
+    // render the middle separator line
+    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Top));
+    frame.render_widget(sep, chunks[2]);
+
+    // render the comamand list
+    app.list_area = chunks[3];
     let items = if app.rows.is_empty() {
         vec![empty_history_item()]
     } else {
         app.rows
             .iter()
             .map(|row| match row {
-                Row::Header(heading) => ListItem::new(Line::from(Span::styled(
-                    heading.clone(),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))),
-                Row::Entry(entry_index) => recent_item(&app.entries[*entry_index]),
+                Row::Header(heading) => date_heading_item(heading),
+                Row::Entry(entry_index) => command_item(&app.entries[*entry_index]),
             })
             .collect::<Vec<_>>()
     };
 
     let list = List::new(items)
-        .block(Block::bordered().title(" rewind "))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+        .block(list_block(None))
+        .highlight_style(selected_item_style());
+    frame.render_stateful_widget(list, chunks[3], &mut app.list_state);
 
-    frame.render_stateful_widget(list, chunks[0], &mut app.list_state);
-
-    let detail_text = app
-        .selected_entry()
-        .map(|entry| format!("Enter or click to rerun from {}", entry.cwd))
-        .unwrap_or_else(|| "Esc cancels".to_string());
-
-    let detail = Paragraph::new(detail_text)
-        .block(Block::bordered().title(" context "))
-        .style(Style::default().fg(Color::DarkGray));
-
-    frame.render_widget(detail, chunks[1]);
-}
-
-fn recent_item(entry: &Entry) -> ListItem<'static> {
-    let (status, status_color) = status_parts(entry);
-    let time = entry.started_at.with_timezone(&Local).format("%H:%M");
-    let branch = entry
-        .git_branch
-        .as_deref()
-        .map(|branch| format!(" [{branch}]"))
-        .unwrap_or_default();
-
-    ListItem::new(Line::from(vec![
-        Span::styled(format!("  {time} "), Style::default().fg(Color::DarkGray)),
-        Span::styled(status, Style::default().fg(status_color)),
-        Span::styled(branch, Style::default().fg(Color::Cyan)),
-        Span::raw("  "),
-        Span::raw(entry.command.clone()),
-    ]))
+    // render the bottom blank separotor line
+    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Bottom));
+    frame.render_widget(sep, chunks[4]);
 }
 
 fn grouped_rows(entries: &[Entry]) -> Vec<Row> {

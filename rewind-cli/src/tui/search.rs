@@ -1,13 +1,14 @@
-use super::shared::status_parts;
+use crate::tui::shared::{Junction, search_bar, separator_line};
+
+use super::shared::{command_item, context_bar, selected_item_style};
 use anyhow::Result;
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use nucleo_matcher::{Config, Matcher};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    style::Style,
+    widgets::{List, ListState, Paragraph},
 };
 use rewind_core::{entry::Entry, fuzzy, query::recent};
 use rusqlite::Connection;
@@ -157,65 +158,34 @@ fn ui(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(3), // search
+            Constraint::Length(1), // context
+            Constraint::Length(1), // separator line
+            Constraint::Min(1),    // list
+            Constraint::Length(1), // blank space
         ])
         .split(frame.area());
 
-    let search = Paragraph::new(format!("> {}", app.query))
-        .block(Block::bordered().title(" rewind "))
-        .style(Style::default().fg(Color::White));
-
+    let search = Paragraph::new(search_bar(&app.query, app.filtered.len(), chunks[0].width));
     frame.render_widget(search, chunks[0]);
+
+    let detail = Paragraph::new(context_bar(app.selected_entry())).style(Style::default());
+
+    frame.render_widget(detail, chunks[1]);
 
     let items = app
         .filtered
         .iter()
-        .map(|&entry_index| search_item(&app.entries[entry_index]))
+        .map(|&entry_index| command_item(&app.entries[entry_index]))
         .collect::<Vec<_>>();
 
-    let list = List::new(items)
-        .block(Block::bordered().title(format!(" {} results ", app.filtered.len())))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).highlight_style(selected_item_style());
 
-    frame.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Top));
+    frame.render_widget(sep, chunks[2]);
 
-    let detail_text = app
-        .selected_entry()
-        .map(|entry| {
-            let duration = entry
-                .duration_ms
-                .map(|duration_ms| format!("  {duration_ms}ms"))
-                .unwrap_or_default();
+    frame.render_stateful_widget(list, chunks[3], &mut app.list_state);
 
-            format!("{}{}", entry.cwd, duration)
-        })
-        .unwrap_or_default();
-
-    let detail = Paragraph::new(detail_text)
-        .block(Block::bordered().title(" context "))
-        .style(Style::default().fg(Color::DarkGray));
-
-    frame.render_widget(detail, chunks[2]);
-}
-
-fn search_item(entry: &Entry) -> ListItem<'static> {
-    let (status, status_color) = status_parts(entry);
-    let branch = entry
-        .git_branch
-        .as_deref()
-        .map(|branch| format!("[{branch}] "))
-        .unwrap_or_default();
-
-    ListItem::new(Line::from(vec![
-        Span::styled(status, Style::default().fg(status_color)),
-        Span::raw(" "),
-        Span::styled(branch, Style::default().fg(Color::Cyan)),
-        Span::raw(entry.command.clone()),
-    ]))
+    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Bottom));
+    frame.render_widget(sep, chunks[4]);
 }
