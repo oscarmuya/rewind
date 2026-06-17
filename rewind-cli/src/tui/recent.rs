@@ -15,11 +15,11 @@ use ratatui::{
 use rewind_core::entry::Entry;
 use std::io;
 
-use crate::tui::shared::{Junction, separator_line, top_bar};
+use chrono::Local;
 
 use super::shared::{
-    command_item, context_bar, date_heading, date_heading_item, empty_history_item, list_block,
-    selected_item_style,
+    CommandDisplay, Junction, command_item, context_bar, date_heading_item, empty_history_item,
+    list_block, selected_item_style, separator_line, top_bar,
 };
 
 struct MouseCaptureGuard;
@@ -45,6 +45,7 @@ enum Row {
 
 struct App {
     entries: Vec<Entry>,
+    display_entries: Vec<CommandDisplay>,
     rows: Vec<Row>,
     list_state: ListState,
     list_area: Rect,
@@ -52,9 +53,15 @@ struct App {
 
 impl App {
     fn new(entries: Vec<Entry>) -> Self {
-        let rows = grouped_rows(&entries);
+        let today = Local::now().date_naive();
+        let display_entries = entries
+            .iter()
+            .map(|entry| CommandDisplay::new(entry, today))
+            .collect::<Vec<_>>();
+        let rows = grouped_rows(&display_entries);
         let mut app = Self {
             entries,
+            display_entries,
             rows,
             list_state: ListState::default(),
             list_area: Rect::default(),
@@ -228,7 +235,10 @@ fn ui(frame: &mut Frame, app: &mut App) {
             .iter()
             .map(|row| match row {
                 Row::Header(heading) => date_heading_item(heading),
-                Row::Entry(entry_index) => command_item(&app.entries[*entry_index]),
+                Row::Entry(entry_index) => command_item(
+                    &app.entries[*entry_index],
+                    &app.display_entries[*entry_index],
+                ),
             })
             .collect::<Vec<_>>()
     };
@@ -243,15 +253,14 @@ fn ui(frame: &mut Frame, app: &mut App) {
     frame.render_widget(sep, chunks[4]);
 }
 
-fn grouped_rows(entries: &[Entry]) -> Vec<Row> {
+fn grouped_rows(display_entries: &[CommandDisplay]) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut last_heading = String::new();
 
-    for (index, entry) in entries.iter().enumerate() {
-        let heading = date_heading(entry);
-        if heading != last_heading {
-            rows.push(Row::Header(heading.clone()));
-            last_heading = heading;
+    for (index, display) in display_entries.iter().enumerate() {
+        if display.heading != last_heading {
+            rows.push(Row::Header(display.heading.clone()));
+            last_heading = display.heading.clone();
         }
 
         rows.push(Row::Entry(index));

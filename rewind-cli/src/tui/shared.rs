@@ -1,4 +1,6 @@
-use chrono::{Datelike, Local};
+use std::sync::OnceLock;
+
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -7,6 +9,7 @@ use ratatui::{
 use rewind_core::entry::Entry;
 
 const GUTTER_WIDTH: usize = 6;
+static HOME: OnceLock<Option<String>> = OnceLock::new();
 
 pub struct TuiTheme {
     pub text: Color,
@@ -59,10 +62,43 @@ fn status_parts(entry: &Entry) -> (&'static str, Color) {
     }
 }
 
+pub struct CommandDisplay {
+    pub heading: String,
+    time: String,
+    status: &'static str,
+    status_color: Color,
+    branch: String,
+}
+
+impl CommandDisplay {
+    pub fn new(entry: &Entry, today: NaiveDate) -> Self {
+        let local = entry.started_at.with_timezone(&Local);
+        let (status, status_color) = status_parts(entry);
+        let branch = entry
+            .git_branch
+            .as_deref()
+            .map(|branch| format!(" [{branch}]"))
+            .unwrap_or_default();
+
+        Self {
+            heading: date_heading_from_local(&local, today),
+            time: local.format("%H:%M").to_string(),
+            status,
+            status_color,
+            branch,
+        }
+    }
+}
+
 pub fn date_heading(entry: &Entry) -> String {
     let local = entry.started_at.with_timezone(&Local);
-    let date = local.date_naive();
     let today = Local::now().date_naive();
+
+    date_heading_from_local(&local, today)
+}
+
+fn date_heading_from_local(local: &DateTime<Local>, today: NaiveDate) -> String {
+    let date = local.date_naive();
 
     if date == today {
         "Today".to_string()
@@ -97,31 +133,19 @@ pub fn date_heading_item(heading: &str) -> ListItem<'static> {
     ))
 }
 
-pub fn command_item(entry: &Entry) -> ListItem<'static> {
-    let (status, status_color) = status_parts(entry);
-    let time = entry
-        .started_at
-        .with_timezone(&Local)
-        .format("%H:%M")
-        .to_string();
-    let branch = entry
-        .git_branch
-        .as_deref()
-        .map(|branch| format!(" [{branch}]"))
-        .unwrap_or_default();
-
+pub fn command_item<'a>(entry: &'a Entry, display: &'a CommandDisplay) -> ListItem<'a> {
     ListItem::new(gutter_line(
-        time,
+        &display.time,
         vec![
-            Span::styled(status, Style::default().fg(status_color)),
-            Span::styled(branch, Style::default().fg(THEME.branch)),
+            Span::styled(display.status, Style::default().fg(display.status_color)),
+            Span::styled(display.branch.as_str(), Style::default().fg(THEME.branch)),
             Span::raw("  "),
-            Span::styled(entry.command.clone(), Style::default().fg(THEME.text)),
+            Span::styled(entry.command.as_str(), Style::default().fg(THEME.text)),
         ],
     ))
 }
 
-fn gutter_line(label: impl AsRef<str>, mut content: Vec<Span<'static>>) -> Line<'static> {
+fn gutter_line<'a>(label: impl AsRef<str>, mut content: Vec<Span<'a>>) -> Line<'a> {
     let mut spans = vec![
         Span::styled(
             format!("{:>GUTTER_WIDTH$} ", label.as_ref()),
@@ -177,9 +201,16 @@ pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
 
     // cwd (shorten ~/home prefix)
     spans.push(sep.clone());
-    let home = std::env::var("HOME").unwrap_or_default();
-    let cwd = if entry.cwd.starts_with(&home) {
-        format!("~{}", &entry.cwd[home.len()..])
+    // Environment variable lookups are relatively expensive and unnecessary to repeat
+    // on every frame since the home directory does not change during the TUI session
+    // so we fetch it once.
+    let home = HOME.get_or_init(|| std::env::var("HOME").ok().filter(|s| !s.is_empty()));
+    let cwd = if let Some(home) = home {
+        if entry.cwd.starts_with(home) {
+            format!("~{}", &entry.cwd[home.len()..])
+        } else {
+            entry.cwd.clone()
+        }
     } else {
         entry.cwd.clone()
     };
