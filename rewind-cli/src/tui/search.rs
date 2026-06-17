@@ -1,7 +1,9 @@
-use crate::tui::shared::{Junction, search_bar, separator_line};
-
-use super::shared::{command_item, context_bar, selected_item_style};
+use super::shared::{
+    CommandDisplay, Junction, command_item, context_bar, search_bar, selected_item_style,
+    separator_line,
+};
 use anyhow::Result;
+use chrono::Local;
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use nucleo_matcher::{Config, Matcher};
 use ratatui::{
@@ -18,6 +20,7 @@ const TUI_ENTRY_LIMIT: usize = 10_000;
 struct App {
     query: String,
     entries: Vec<Entry>,
+    display_entries: Vec<CommandDisplay>,
     filtered: Vec<usize>, // Indices into entries.
     list_state: ListState,
     matcher: Matcher,
@@ -27,6 +30,11 @@ impl App {
     fn new(entries: Vec<Entry>) -> Self {
         let matcher = Matcher::new(Config::DEFAULT);
         let filtered = (0..entries.len()).collect::<Vec<_>>();
+        let today = Local::now().date_naive();
+        let display_entries = entries
+            .iter()
+            .map(|entry| CommandDisplay::new(entry, today))
+            .collect();
         let mut list_state = ListState::default();
 
         if !filtered.is_empty() {
@@ -36,6 +44,7 @@ impl App {
         Self {
             query: String::new(),
             entries,
+            display_entries,
             filtered,
             list_state,
             matcher,
@@ -176,7 +185,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
     let items = app
         .filtered
         .iter()
-        .map(|&entry_index| command_item(&app.entries[entry_index]))
+        .map(|&entry_index| {
+            command_item(&app.entries[entry_index], &app.display_entries[entry_index])
+        })
         .collect::<Vec<_>>();
 
     let list = List::new(items).highlight_style(selected_item_style());
