@@ -1,21 +1,30 @@
+use anyhow::Result;
+use chrono::Local;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use nucleo_matcher::{Config, Matcher};
+use ratatui::{
+    DefaultTerminal, Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::Style,
+    widgets::{List, ListState, Paragraph},
+};
+use ratatui_textarea::TextArea;
+use rewind_core::{entry::Entry, fuzzy, query::recent};
+use rusqlite::Connection;
+
 use super::shared::{
     CommandDisplay, Junction, command_item, context_bar, search_bar, selected_item_style,
     separator_line,
 };
-use anyhow::Result;
-use chrono::Local;
-use crossterm::event::{self, KeyCode, KeyModifiers};
-use nucleo_matcher::{Config, Matcher};
-use ratatui::{
-    DefaultTerminal, Frame,
-    layout::{Constraint, Direction, Layout},
-    style::Style,
-    widgets::{List, ListState, Paragraph},
-};
-use rewind_core::{entry::Entry, fuzzy, query::recent};
-use rusqlite::Connection;
+use crate::tui::shared::{editor_for_command, render_editor_modal};
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
+
+#[derive(Debug)]
+struct EditedCommand {
+    entry_index: usize,
+    command: String,
+}
 
 struct App {
     query: String,
@@ -24,31 +33,36 @@ struct App {
     filtered: Vec<usize>, // Indices into entries.
     list_state: ListState,
     matcher: Matcher,
+    command_to_run: Option<EditedCommand>,
+    edit_input: Option<TextArea<'static>>,
 }
 
 impl App {
-    fn new(entries: Vec<Entry>) -> Self {
-        let matcher = Matcher::new(Config::DEFAULT);
-        let filtered = (0..entries.len()).collect::<Vec<_>>();
+    fn new(entries: Vec<Entry>, initial_query: &str) -> Self {
         let today = Local::now().date_naive();
+
         let display_entries = entries
             .iter()
             .map(|entry| CommandDisplay::new(entry, today))
             .collect();
-        let mut list_state = ListState::default();
 
-        if !filtered.is_empty() {
-            list_state.select(Some(0));
-        }
-
-        Self {
-            query: String::new(),
+        let mut app = Self {
+            query: initial_query.to_owned(),
             entries,
             display_entries,
-            filtered,
-            list_state,
-            matcher,
-        }
+            filtered: Vec::new(),
+            list_state: ListState::default(),
+            matcher: Matcher::new(Config::DEFAULT),
+            command_to_run: None,
+            edit_input: None,
+        };
+
+        app.refilter();
+        app
+    }
+
+    fn is_editing(&self) -> bool {
+        self.edit_input.is_some()
     }
 
     fn refilter(&mut self) {
@@ -63,15 +77,28 @@ impl App {
             )
         };
 
+        self.select_first_result();
+    }
+
+    fn selected_entry(&self) -> Option<&Entry> {
+        self.selected_entry_index()
+            .and_then(|entry_index| self.entries.get(entry_index))
+    }
+
+    fn selected_entry_index(&self) -> Option<usize> {
+        self.list_state
+            .selected()
+            .and_then(|selected| self.filtered.get(selected))
+            .copied()
+    }
+
+    fn select_first_result(&mut self) {
         self.list_state
             .select((!self.filtered.is_empty()).then_some(0));
     }
 
-    fn selected_entry(&self) -> Option<&Entry> {
-        self.list_state
-            .selected()
-            .and_then(|selected| self.filtered.get(selected))
-            .and_then(|&entry_index| self.entries.get(entry_index))
+    fn clear_selection(&mut self) {
+        self.list_state.select(None);
     }
 
     fn move_down(&mut self) {
@@ -79,10 +106,11 @@ impl App {
             return;
         }
 
-        let selected = self.list_state.selected().unwrap_or(0);
-        let last = self.filtered.len() - 1;
+        let selected = self.list_state.selected().unwrap_or_default();
+        let last = self.filtered.len().saturating_sub(1);
 
-        self.list_state.select(Some((selected + 1).min(last)));
+        self.list_state
+            .select(Some(selected.saturating_add(1).min(last)));
     }
 
     fn move_up(&mut self) {
@@ -90,23 +118,49 @@ impl App {
             return;
         }
 
-        let selected = self.list_state.selected().unwrap_or(0);
-
+        let selected = self.list_state.selected().unwrap_or_default();
         self.list_state.select(Some(selected.saturating_sub(1)));
     }
 
-    fn push_query_char(&mut self, c: char) {
-        self.query.push(c);
+    fn push_query_char(&mut self, character: char) {
+        self.query.push(character);
         self.refilter();
     }
 
     fn pop_query_char(&mut self) {
-        self.query.pop();
-        self.refilter();
+        if self.query.pop().is_some() {
+            self.refilter();
+        }
     }
 
-    fn clear_selection(&mut self) {
-        self.list_state.select(None);
+    fn open_editor_for_selected_entry(&mut self) {
+        let Some(entry) = self.selected_entry() else {
+            return;
+        };
+
+        self.edit_input = Some(editor_for_command(&entry.command));
+    }
+
+    fn cancel_edit(&mut self) {
+        self.edit_input = None;
+    }
+
+    fn confirm_edit(&mut self) -> bool {
+        let Some(entry_index) = self.selected_entry_index() else {
+            self.edit_input = None;
+            return false;
+        };
+
+        let Some(textarea) = self.edit_input.take() else {
+            return false;
+        };
+
+        self.command_to_run = Some(EditedCommand {
+            entry_index,
+            command: textarea.lines().join("\n"),
+        });
+
+        true
     }
 }
 
@@ -116,51 +170,112 @@ pub fn run(
     initial_query: &str,
 ) -> Result<Option<Entry>> {
     let entries = recent(conn, project_root_str, TUI_ENTRY_LIMIT)?;
-    let mut app = App::new(entries);
-
-    if !initial_query.is_empty() {
-        app.query = initial_query.to_owned();
-        app.refilter();
-    }
+    let mut app = App::new(entries, initial_query);
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
 
-    Ok(app.selected_entry().cloned())
+    let Some(edited) = app.command_to_run.take() else {
+        return Ok(None);
+    };
+
+    let entry = app
+        .entries
+        .get(edited.entry_index)
+        .cloned()
+        .map(|mut entry| {
+            entry.command = edited.command;
+            entry
+        });
+
+    Ok(entry)
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| ui(frame, app))?;
 
-        let event = event::read()?;
-        let Some(key) = event.as_key_press_event() else {
-            continue;
-        };
-
-        match key.code {
-            KeyCode::Esc => {
-                app.clear_selection();
-                return Ok(());
-            }
-            KeyCode::Enter => return Ok(()),
-            KeyCode::Down => app.move_down(),
-            KeyCode::Up => app.move_up(),
-            KeyCode::Backspace => app.pop_query_char(),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.clear_selection();
-                return Ok(());
-            }
-            KeyCode::Char('j') if key.modifiers.is_empty() => app.move_down(),
-            KeyCode::Char('k') if key.modifiers.is_empty() => app.move_up(),
-            KeyCode::Char(c)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                app.push_query_char(c);
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if app.is_editing() {
+                    if handle_editor_key(app, key) {
+                        return Ok(());
+                    }
+                } else if handle_search_key(app, key) {
+                    return Ok(());
+                }
             }
             _ => {}
         }
     }
+}
+
+fn handle_editor_key(app: &mut App, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.cancel_edit();
+        }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+            if let Some(textarea) = app.edit_input.as_mut() {
+                textarea.insert_newline();
+            }
+        }
+        KeyCode::Enter => {
+            return app.confirm_edit();
+        }
+        _ => {
+            if let Some(textarea) = app.edit_input.as_mut() {
+                textarea.input(key);
+            }
+        }
+    }
+
+    false
+}
+
+fn handle_search_key(app: &mut App, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.clear_selection();
+            true
+        }
+        KeyCode::Enter => {
+            app.open_editor_for_selected_entry();
+            false
+        }
+        KeyCode::Down => {
+            app.move_down();
+            false
+        }
+        KeyCode::Up => {
+            app.move_up();
+            false
+        }
+        KeyCode::Backspace => {
+            app.pop_query_char();
+            false
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_selection();
+            true
+        }
+        KeyCode::Char('j') if key.modifiers.is_empty() => {
+            app.move_down();
+            false
+        }
+        KeyCode::Char('k') if key.modifiers.is_empty() => {
+            app.move_up();
+            false
+        }
+        KeyCode::Char(character) if is_plain_text_input(key.modifiers) => {
+            app.push_query_char(character);
+            false
+        }
+        _ => false,
+    }
+}
+
+fn is_plain_text_input(modifiers: KeyModifiers) -> bool {
+    !modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
@@ -175,13 +290,33 @@ fn ui(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
-    let search = Paragraph::new(search_bar(&app.query, app.filtered.len(), chunks[0].width));
-    frame.render_widget(search, chunks[0]);
+    render_search(frame, app, chunks[0]);
+    render_context(frame, app, chunks[1]);
+    render_separator(frame, chunks[2], chunks[1].width, Junction::Top);
+    render_entry_list(frame, app, chunks[3]);
+    render_separator(frame, chunks[4], chunks[1].width, Junction::Bottom);
 
+    if let Some(textarea) = app.edit_input.as_mut() {
+        render_editor_modal(frame, textarea);
+    }
+}
+
+fn render_search(frame: &mut Frame, app: &App, area: Rect) {
+    let search = Paragraph::new(search_bar(&app.query, app.filtered.len(), area.width));
+    frame.render_widget(search, area);
+}
+
+fn render_context(frame: &mut Frame, app: &App, area: Rect) {
     let detail = Paragraph::new(context_bar(app.selected_entry())).style(Style::default());
+    frame.render_widget(detail, area);
+}
 
-    frame.render_widget(detail, chunks[1]);
+fn render_separator(frame: &mut Frame, area: Rect, width: u16, junction: Junction) {
+    let separator = Paragraph::new(separator_line(width, junction));
+    frame.render_widget(separator, area);
+}
 
+fn render_entry_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let items = app
         .filtered
         .iter()
@@ -192,11 +327,5 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     let list = List::new(items).highlight_style(selected_item_style());
 
-    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Top));
-    frame.render_widget(sep, chunks[2]);
-
-    frame.render_stateful_widget(list, chunks[3], &mut app.list_state);
-
-    let sep = Paragraph::new(separator_line(chunks[1].width, Junction::Bottom));
-    frame.render_widget(sep, chunks[4]);
+    frame.render_stateful_widget(list, area, &mut app.list_state);
 }
