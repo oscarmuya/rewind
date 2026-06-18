@@ -11,43 +11,13 @@ use ratatui::{
 use ratatui_textarea::{CursorMove, TextArea};
 use rewind_core::entry::Entry;
 
+use crate::tui::themes::THEME;
+
 const GUTTER_WIDTH: usize = 6;
 const EDIT_MODAL_WIDTH_PERCENT: u16 = 70;
 const EDIT_MODAL_HEIGHT: u16 = 8;
 
 static HOME: OnceLock<Option<String>> = OnceLock::new();
-
-pub struct TuiTheme {
-    pub text: Color,
-    pub muted: Color,
-    pub subtle: Color,
-    pub border: Color,
-    pub heading: Color,
-    pub success: Color,
-    pub error: Color,
-    pub branch: Color,
-    pub branch_text: Color,
-    pub branch_bg: Color,
-    pub selected_item_bg: Color,
-    pub modal_overlay_bg: Color,
-    pub modal_overlay_fg: Color,
-}
-
-pub const THEME: TuiTheme = TuiTheme {
-    text: Color::White,
-    muted: Color::Gray,
-    subtle: Color::DarkGray,
-    border: Color::Rgb(54, 68, 58),
-    heading: Color::Yellow,
-    success: Color::Green,
-    error: Color::Red,
-    branch: Color::Cyan,
-    branch_text: Color::Rgb(148, 163, 184),
-    branch_bg: Color::Rgb(30, 41, 59),
-    selected_item_bg: Color::Rgb(64, 64, 64),
-    modal_overlay_bg: Color::Black,
-    modal_overlay_fg: Color::DarkGray,
-};
 
 pub enum Junction {
     Top,    // ┬
@@ -219,6 +189,10 @@ pub fn editor_for_command(command: &str) -> TextArea<'static> {
     textarea.move_cursor(CursorMove::End);
 
     textarea
+}
+
+pub fn tui_background() -> Block<'static> {
+    Block::default().style(Style::default().bg(THEME.background))
 }
 
 pub fn editor_block() -> Block<'static> {

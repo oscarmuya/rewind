@@ -16,7 +16,10 @@ use super::shared::{
     CommandDisplay, Junction, command_item, context_bar, search_bar, selected_item_style,
     separator_line,
 };
-use crate::tui::shared::{editor_for_command, render_editor_modal};
+use crate::tui::{
+    shared::{editor_for_command, render_editor_modal, tui_background},
+    themes::init_theme,
+};
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
 
@@ -171,6 +174,7 @@ pub fn run(
 ) -> Result<Option<Entry>> {
     let entries = recent(conn, project_root_str, TUI_ENTRY_LIMIT)?;
     let mut app = App::new(entries, initial_query);
+    init_theme();
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
 
@@ -279,6 +283,12 @@ fn is_plain_text_input(modifiers: KeyModifiers) -> bool {
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
+    frame.render_widget(tui_background(), frame.area());
+    let padded_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1)])
+        .horizontal_margin(1)
+        .split(frame.area())[0];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -288,7 +298,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Constraint::Min(1),    // list
             Constraint::Length(1), // blank space
         ])
-        .split(frame.area());
+        .split(padded_area);
 
     render_search(frame, app, chunks[0]);
     render_context(frame, app, chunks[1]);

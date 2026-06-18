@@ -18,7 +18,10 @@ use ratatui::{
 use ratatui_textarea::TextArea;
 use rewind_core::entry::Entry;
 
-use crate::tui::shared::{editor_for_command, render_editor_modal};
+use crate::tui::{
+    shared::{editor_for_command, render_editor_modal, tui_background},
+    themes::init_theme,
+};
 
 use super::shared::{
     CommandDisplay, Junction, command_item, context_bar, date_heading_item, empty_history_item,
@@ -149,10 +152,12 @@ impl App {
             return false;
         }
 
+        let left = self.list_area.x;
+        let right = self.list_area.x.saturating_add(self.list_area.width);
         let top = self.list_area.y;
         let bottom = self.list_area.y.saturating_add(self.list_area.height);
 
-        if mouse.row < top || mouse.row >= bottom {
+        if mouse.column < left || mouse.column >= right || mouse.row < top || mouse.row >= bottom {
             return false;
         }
 
@@ -220,6 +225,7 @@ impl App {
 pub fn run(entries: Vec<Entry>) -> Result<Option<Entry>> {
     let _mouse = MouseCaptureGuard::enable()?;
     let mut app = App::new(entries);
+    init_theme();
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
 
@@ -341,6 +347,13 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
+    frame.render_widget(tui_background(), frame.area());
+
+    let padded_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1)])
+        .horizontal_margin(1)
+        .split(frame.area())[0];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -350,7 +363,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Constraint::Min(1),    // command list
             Constraint::Length(1), // bottom separator / blank space
         ])
-        .split(frame.area());
+        .split(padded_area);
 
     render_top_bar(frame, chunks[0]);
     render_context_bar(frame, app, chunks[1]);
