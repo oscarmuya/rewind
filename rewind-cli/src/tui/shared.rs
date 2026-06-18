@@ -2,13 +2,19 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, ListItem},
+    widgets::{Block, Clear, ListItem, Padding, Paragraph},
 };
+use ratatui_textarea::{CursorMove, TextArea};
 use rewind_core::entry::Entry;
 
 const GUTTER_WIDTH: usize = 6;
+const EDIT_MODAL_WIDTH_PERCENT: u16 = 70;
+const EDIT_MODAL_HEIGHT: u16 = 8;
+
 static HOME: OnceLock<Option<String>> = OnceLock::new();
 
 pub struct TuiTheme {
@@ -23,6 +29,8 @@ pub struct TuiTheme {
     pub branch_text: Color,
     pub branch_bg: Color,
     pub selected_item_bg: Color,
+    pub modal_overlay_bg: Color,
+    pub modal_overlay_fg: Color,
 }
 
 pub const THEME: TuiTheme = TuiTheme {
@@ -37,29 +45,13 @@ pub const THEME: TuiTheme = TuiTheme {
     branch_text: Color::Rgb(148, 163, 184),
     branch_bg: Color::Rgb(30, 41, 59),
     selected_item_bg: Color::Rgb(64, 64, 64),
+    modal_overlay_bg: Color::Black,
+    modal_overlay_fg: Color::DarkGray,
 };
 
-pub fn selected_item_style() -> Style {
-    Style::default()
-        .bg(THEME.selected_item_bg)
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn list_block<'a>(title: impl Into<Option<String>>) -> Block<'a> {
-    let block = Block::default();
-
-    match title.into() {
-        Some(title) => block.title(title),
-        Option::None => block,
-    }
-}
-
-fn status_parts(entry: &Entry) -> (&'static str, Color) {
-    match entry.exit_code {
-        Some(0) => ("✓", THEME.success),
-        Some(_) => ("✗", THEME.error),
-        Option::None => ("?", THEME.subtle),
-    }
+pub enum Junction {
+    Top,    // ┬
+    Bottom, // ┴
 }
 
 pub struct CommandDisplay {
@@ -74,40 +66,27 @@ impl CommandDisplay {
     pub fn new(entry: &Entry, today: NaiveDate) -> Self {
         let local = entry.started_at.with_timezone(&Local);
         let (status, status_color) = status_parts(entry);
-        let branch = entry
-            .git_branch
-            .as_deref()
-            .map(|branch| format!(" [{branch}]"))
-            .unwrap_or_default();
 
         Self {
             heading: date_heading_from_local(&local, today),
             time: local.format("%H:%M").to_string(),
             status,
             status_color,
-            branch,
+            branch: format_branch_label(entry.git_branch.as_deref()),
         }
     }
 }
 
-pub fn date_heading(entry: &Entry) -> String {
-    let local = entry.started_at.with_timezone(&Local);
-    let today = Local::now().date_naive();
-
-    date_heading_from_local(&local, today)
+pub fn selected_item_style() -> Style {
+    Style::default()
+        .bg(THEME.selected_item_bg)
+        .add_modifier(Modifier::BOLD)
 }
 
-fn date_heading_from_local(local: &DateTime<Local>, today: NaiveDate) -> String {
-    let date = local.date_naive();
-
-    if date == today {
-        "Today".to_string()
-    } else if date == today.pred_opt().unwrap_or(today) {
-        "Yesterday".to_string()
-    } else if date.year() == today.year() {
-        local.format("%A, %b %-d").to_string()
-    } else {
-        local.format("%A, %b %-d, %Y").to_string()
+pub fn list_block<'a>(title: impl Into<Option<String>>) -> Block<'a> {
+    match title.into() {
+        Some(title) => Block::default().title(title),
+        None => Block::default(),
     }
 }
 
@@ -145,30 +124,6 @@ pub fn command_item<'a>(entry: &'a Entry, display: &'a CommandDisplay) -> ListIt
     ))
 }
 
-fn gutter_line<'a>(label: impl AsRef<str>, mut content: Vec<Span<'a>>) -> Line<'a> {
-    let mut spans = vec![
-        Span::styled(
-            format!("{:>GUTTER_WIDTH$} ", label.as_ref()),
-            Style::default().fg(THEME.subtle),
-        ),
-        Span::styled("│", Style::default().fg(THEME.border)),
-        Span::raw(" "),
-    ];
-
-    spans.append(&mut content);
-    Line::from(spans)
-}
-
-pub fn format_duration(ms: i64) -> String {
-    if ms < 1000 {
-        format!("{}ms", ms)
-    } else if ms < 60_000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        format!("{}m{}s", ms / 60_000, (ms % 60_000) / 1000)
-    }
-}
-
 pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
     let Some(entry) = entry else {
         return Line::from(Span::styled(
@@ -177,56 +132,37 @@ pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
         ));
     };
 
-    let mut spans: Vec<Span> = Vec::new();
-    let sep = Span::styled(" · ", Style::default().fg(THEME.subtle));
+    let mut spans = Vec::new();
+    let separator = Span::styled(" · ", Style::default().fg(THEME.subtle));
 
-    // exit code
-    match entry.exit_code {
-        Option::None => spans.push(Span::styled("● running", Style::default().fg(THEME.subtle))),
-        Some(0) => spans.push(Span::styled("exit 0", Style::default().fg(THEME.success))),
-        Some(n) => spans.push(Span::styled(
-            format!("exit {}", n),
-            Style::default().fg(THEME.error),
-        )),
-    }
+    push_exit_status(&mut spans, entry);
 
-    // duration
     if let Some(ms) = entry.duration_ms {
-        spans.push(sep.clone());
+        spans.push(separator.clone());
         spans.push(Span::styled(
             format_duration(ms),
             Style::default().fg(THEME.muted),
         ));
     }
 
-    // cwd (shorten ~/home prefix)
-    spans.push(sep.clone());
     // Environment variable lookups are relatively expensive and unnecessary to repeat
-    // on every frame since the home directory does not change during the TUI session
-    // so we fetch it once.
-    let home = HOME.get_or_init(|| std::env::var("HOME").ok().filter(|s| !s.is_empty()));
-    let cwd = if let Some(home) = home {
-        if entry.cwd.starts_with(home) {
-            format!("~{}", &entry.cwd[home.len()..])
-        } else {
-            entry.cwd.clone()
-        }
-    } else {
-        entry.cwd.clone()
-    };
-    spans.push(Span::styled(cwd, Style::default().fg(THEME.muted)));
+    // on every frame since the home directory does not change during the TUI session,
+    // so we fetch and cache it once.
+    spans.push(separator.clone());
+    spans.push(Span::styled(
+        shorten_home_path(&entry.cwd),
+        Style::default().fg(THEME.muted),
+    ));
 
-    // git branch
     if let Some(branch) = &entry.git_branch {
-        spans.push(sep.clone());
+        spans.push(separator.clone());
         spans.push(Span::styled(
-            format!(" {} ", branch),
+            format!(" {branch} "),
             Style::default().fg(THEME.branch_text).bg(THEME.branch_bg),
         ));
     }
 
-    // timestamp
-    spans.push(sep.clone());
+    spans.push(separator);
     spans.push(Span::styled(
         date_heading(entry),
         Style::default().fg(THEME.subtle),
@@ -235,38 +171,21 @@ pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
     Line::from(spans)
 }
 
-fn h_line(width: u16, junction: &'static str) -> Line<'static> {
-    let gutter = "─".repeat(GUTTER_WIDTH + 1);
-    let tail = "─".repeat((width as usize).saturating_sub(GUTTER_WIDTH + 2));
-    Line::from(vec![
-        Span::styled(gutter, Style::default().fg(THEME.border)),
-        Span::styled(junction, Style::default().fg(THEME.border)),
-        Span::styled(tail, Style::default().fg(THEME.border)),
-    ])
-}
-
-pub enum Junction {
-    Top,    // ┬
-    Bottom, // ┴
-}
-
 pub fn separator_line(width: u16, junction: Junction) -> Line<'static> {
-    let ch = match junction {
+    let junction = match junction {
         Junction::Top => "┬",
         Junction::Bottom => "┴",
     };
-    h_line(width, ch)
+
+    h_line(width, junction)
 }
 
 pub fn search_bar(query: &str, result_count: usize, width: u16) -> Vec<Line<'static>> {
     let input = Line::from(vec![
-        Span::styled(
-            format!("{:>GUTTER_WIDTH$} ", result_count),
-            Style::default().fg(THEME.subtle),
-        ),
-        Span::styled("│", Style::default().fg(THEME.border)),
+        gutter_label(result_count.to_string()),
+        border_span("│"),
         Span::styled(" / ", Style::default().fg(THEME.subtle)),
-        Span::styled(query.to_string(), Style::default().fg(THEME.text)),
+        Span::styled(query.to_owned(), Style::default().fg(THEME.text)),
     ]);
 
     vec![h_line(width, "┬"), input, h_line(width, "┴")]
@@ -274,11 +193,8 @@ pub fn search_bar(query: &str, result_count: usize, width: u16) -> Vec<Line<'sta
 
 pub fn top_bar(width: u16) -> Vec<Line<'static>> {
     let input = Line::from(vec![
-        Span::styled(
-            format!("{:>GUTTER_WIDTH$} ", ""),
-            Style::default().fg(THEME.subtle),
-        ),
-        Span::styled("│", Style::default().fg(THEME.border)),
+        gutter_label(""),
+        border_span("│"),
         Span::styled(
             " Rewind ",
             Style::default()
@@ -293,4 +209,215 @@ pub fn top_bar(width: u16) -> Vec<Line<'static>> {
     ]);
 
     vec![h_line(width, "┬"), input, h_line(width, "┴")]
+}
+
+pub fn editor_for_command(command: &str) -> TextArea<'static> {
+    let mut textarea = TextArea::new(command_lines(command));
+
+    // Place cursor at the end of the last line.
+    textarea.move_cursor(CursorMove::Bottom);
+    textarea.move_cursor(CursorMove::End);
+
+    textarea
+}
+
+pub fn editor_block() -> Block<'static> {
+    Block::default().padding(Padding {
+        left: 1,
+        right: 1,
+        top: 0,
+        bottom: 0,
+    })
+}
+
+pub fn editor_footer(width: u16) -> Paragraph<'static> {
+    let input = Line::from(vec![
+        gutter_label(""),
+        border_span("│"),
+        Span::styled(
+            " Rewind command ",
+            Style::default()
+                .fg(THEME.heading)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("· ", Style::default().fg(THEME.subtle)),
+        Span::styled(
+            "[Enter] run  [Alt+Enter] newline  [Esc] cancel ",
+            Style::default().fg(THEME.subtle),
+        ),
+    ]);
+
+    Paragraph::new(vec![h_line(width, "┬"), input, h_line(width, "┴")])
+}
+
+pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>) {
+    let screen_area = frame.area();
+
+    let dim_block = Block::default().style(
+        Style::default()
+            .bg(THEME.modal_overlay_bg)
+            .fg(THEME.modal_overlay_fg),
+    );
+
+    frame.render_widget(dim_block, screen_area);
+
+    let modal_area = edit_modal_area(screen_area, textarea);
+    frame.render_widget(Clear, modal_area);
+
+    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(modal_area);
+    let editor_area = chunks[1];
+    let footer_area = chunks[0];
+
+    textarea.set_block(editor_block());
+
+    frame.render_widget(&*textarea, editor_area);
+    frame.render_widget(editor_footer(footer_area.width), footer_area);
+}
+
+pub fn centered_modal(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let percent_x = percent_x.clamp(1, 100);
+    let side_percent = (100 - percent_x) / 2;
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(height),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(side_percent),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage(side_percent),
+        ])
+        .split(vertical[1])[1]
+}
+
+fn edit_modal_area(screen_area: Rect, textarea: &TextArea<'static>) -> Rect {
+    let line_count = textarea.lines().len().max(1) as u16;
+
+    let desired_height = line_count.saturating_add(2);
+    let min_height = screen_area.height.min(EDIT_MODAL_HEIGHT);
+    let max_height = (screen_area.height / 2).max(min_height);
+    let modal_height = desired_height.clamp(min_height, max_height);
+
+    centered_modal(EDIT_MODAL_WIDTH_PERCENT, modal_height, screen_area)
+}
+
+pub fn date_heading(entry: &Entry) -> String {
+    let local = entry.started_at.with_timezone(&Local);
+    let today = Local::now().date_naive();
+
+    date_heading_from_local(&local, today)
+}
+
+pub fn format_duration(ms: i64) -> String {
+    match ms {
+        ms if ms < 1_000 => format!("{ms}ms"),
+        ms if ms < 60_000 => format!("{:.1}s", ms as f64 / 1_000.0),
+        ms => format!("{}m{}s", ms / 60_000, (ms % 60_000) / 1_000),
+    }
+}
+
+fn status_parts(entry: &Entry) -> (&'static str, Color) {
+    match entry.exit_code {
+        Some(0) => ("✓", THEME.success),
+        Some(_) => ("✗", THEME.error),
+        None => ("?", THEME.subtle),
+    }
+}
+
+fn format_branch_label(branch: Option<&str>) -> String {
+    branch
+        .map(|branch| format!(" [{branch}]"))
+        .unwrap_or_default()
+}
+
+fn date_heading_from_local(local: &DateTime<Local>, today: NaiveDate) -> String {
+    let date = local.date_naive();
+
+    if date == today {
+        "Today".to_string()
+    } else if today.pred_opt().is_some_and(|yesterday| date == yesterday) {
+        "Yesterday".to_string()
+    } else if date.year() == today.year() {
+        local.format("%A, %b %-d").to_string()
+    } else {
+        local.format("%A, %b %-d, %Y").to_string()
+    }
+}
+
+fn push_exit_status(spans: &mut Vec<Span<'static>>, entry: &Entry) {
+    match entry.exit_code {
+        None => spans.push(Span::styled("● running", Style::default().fg(THEME.subtle))),
+        Some(0) => spans.push(Span::styled("exit 0", Style::default().fg(THEME.success))),
+        Some(code) => spans.push(Span::styled(
+            format!("exit {code}"),
+            Style::default().fg(THEME.error),
+        )),
+    }
+}
+
+fn shorten_home_path(cwd: &str) -> String {
+    let Some(home) = HOME
+        .get_or_init(|| std::env::var("HOME").ok().filter(|home| !home.is_empty()))
+        .as_deref()
+    else {
+        return cwd.to_owned();
+    };
+
+    if cwd == home {
+        return "~".to_string();
+    }
+
+    cwd.strip_prefix(home)
+        .filter(|suffix| suffix.starts_with(std::path::MAIN_SEPARATOR))
+        .map(|suffix| format!("~{suffix}"))
+        .unwrap_or_else(|| cwd.to_owned())
+}
+
+fn h_line(width: u16, junction: &'static str) -> Line<'static> {
+    let gutter = "─".repeat(GUTTER_WIDTH + 1);
+    let tail_width = usize::from(width).saturating_sub(GUTTER_WIDTH + 2);
+    let tail = "─".repeat(tail_width);
+
+    Line::from(vec![
+        border_span(gutter),
+        border_span(junction),
+        border_span(tail),
+    ])
+}
+
+fn gutter_line<'a>(label: impl AsRef<str>, mut content: Vec<Span<'a>>) -> Line<'a> {
+    let mut spans = vec![
+        gutter_label(label.as_ref()),
+        border_span("│"),
+        Span::raw(" "),
+    ];
+
+    spans.append(&mut content);
+    Line::from(spans)
+}
+
+fn gutter_label<'a>(label: impl AsRef<str>) -> Span<'a> {
+    Span::styled(
+        format!("{:>GUTTER_WIDTH$} ", label.as_ref()),
+        Style::default().fg(THEME.subtle),
+    )
+}
+
+fn border_span<'a>(content: impl Into<std::borrow::Cow<'a, str>>) -> Span<'a> {
+    Span::styled(content.into(), Style::default().fg(THEME.border))
+}
+
+fn command_lines(command: &str) -> Vec<String> {
+    if command.is_empty() {
+        return vec![String::new()];
+    }
+
+    command.lines().map(str::to_owned).collect()
 }

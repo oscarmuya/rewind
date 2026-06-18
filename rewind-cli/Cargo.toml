@@ -19,3 +19,4 @@ nucleo = { workspace = true }
 git2 = { workspace = true }
 rusqlite = { workspace = true }
 nucleo-matcher = { workspace = true }
+ratatui-textarea = { workspace = true }
