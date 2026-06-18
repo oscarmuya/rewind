@@ -210,6 +210,15 @@ rw --repo --branch --fail --limit 10
 
 `rw recent` is still accepted as a compatibility alias for the same behavior.
 
+In the recent-command TUI:
+
+- use `Up`/`Down` or `k`/`j` to move
+- click a command or press `Enter` to open it in the replay editor
+- edit the command, then press `Enter` to run it
+- press `Alt+Enter` in the editor to insert a newline for multiline commands
+- press `Esc` in the editor to cancel editing and return to the list
+- press `Esc` or `Ctrl-C` in the list to exit without selecting a command
+
 ## Search History
 
 Open the interactive TUI:
@@ -235,8 +244,11 @@ In the TUI:
 
 - type to filter commands
 - use `Up`/`Down` or `k`/`j` to move
-- press `Enter` to rerun the selected command
-- press `Esc` or `Ctrl-C` to exit without selecting
+- press `Enter` to open the selected command in the replay editor
+- edit the command, then press `Enter` to run it
+- press `Alt+Enter` in the editor to insert a newline for multiline commands
+- press `Esc` in the editor to cancel editing and return to search
+- press `Esc` or `Ctrl-C` in search to exit without selecting
 
 ## Data Files
 
