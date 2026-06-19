@@ -21,6 +21,14 @@ pub fn exit_code_to_process_code(code: i32) -> ExitCode {
     }
 }
 
+/// Wrap in single quotes, escaping any single quotes within
+pub fn parse_cmd_args(cmd: &[String]) -> String {
+    cmd.iter()
+        .map(|arg| format!("'{}'", arg.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn send_to_daemon(command: &str, cwd: &str, exit_code: i32, duration_ms: i64) -> Result<()> {
     let payload = HookPayload {
         command: command.to_owned(),

@@ -1,4 +1,5 @@
 use crate::entry::Entry;
+use crate::shortcut::Shortcut;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use dirs::data_dir;
@@ -7,9 +8,14 @@ use std::path::PathBuf;
 
 /// Returns the path to the rewind data directory, creating it if needed.
 pub fn data_path() -> Result<PathBuf> {
-    let dir = data_dir()
-        .context("could not resolve XDG data directory")?
-        .join("rewind");
+    let dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".dev-data")
+    } else {
+        data_dir()
+            .context("could not resolve XDG data directory")?
+            .join("rewind")
+    };
+
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("could not create data dir: {}", dir.display()))?;
     Ok(dir)
@@ -29,7 +35,7 @@ pub fn open() -> Result<Connection> {
 }
 
 /// The current schema version.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Applies all schema migrations in order, using schema_version to track
 /// which migrations have already been applied. Each migration is additive
@@ -67,7 +73,7 @@ fn migrate(conn: &Connection) -> Result<()> {
         .context("migration 1 failed")?;
     }
 
-    // Migration 2: add project_cwd column to scope commands to the git root
+    // Migration 2: add project_cwd column to scope commands to the git root.
     if version < 2 {
         conn.execute_batch(
             "ALTER TABLE entries ADD COLUMN project_cwd TEXT;
@@ -75,6 +81,27 @@ fn migrate(conn: &Connection) -> Result<()> {
              UPDATE entries SET project_cwd = cwd WHERE project_cwd IS NULL;",
         )
         .context("migration 2 failed")?;
+    }
+
+    // Migration 3: add shortcuts table for saved command aliases.
+    if version < 3 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS shortcuts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                alias       TEXT    NOT NULL,
+                command     TEXT    NOT NULL,
+                project_dir TEXT    NOT NULL,
+                git_repo    TEXT,
+                is_global   BOOLEAN DEFAULT FALSE,
+                created_at  DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                UNIQUE(alias, project_dir)
+            );
+            CREATE INDEX IF NOT EXISTS idx_shortcuts_alias       ON shortcuts(alias);
+            CREATE INDEX IF NOT EXISTS idx_shortcuts_project_dir ON shortcuts(project_dir);
+            CREATE INDEX IF NOT EXISTS idx_shortcuts_git_repo    ON shortcuts(git_repo);
+            CREATE INDEX IF NOT EXISTS idx_shortcuts_is_global   ON shortcuts(is_global);",
+        )
+        .context("migration 3 failed")?;
     }
 
     // Stamp the version after all migrations succeed.
@@ -153,5 +180,58 @@ pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
         exit_code: row.get(6)?,
         duration_ms: row.get(7)?,
         started_at,
+    })
+}
+
+/// Inserts a new shortcut and returns it with its assigned id.
+pub fn insert_shortcut(conn: &Connection, shortcut: &Shortcut) -> Result<Shortcut> {
+    conn.execute(
+        "INSERT INTO shortcuts (alias, command, project_dir, git_repo, is_global, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            shortcut.alias,
+            shortcut.command,
+            shortcut.project_dir,
+            shortcut.git_repo,
+            shortcut.is_global,
+            shortcut.created_at.to_rfc3339(),
+        ],
+    )
+    .context("insert shortcut failed")?;
+
+    let id = conn.last_insert_rowid();
+    Ok(Shortcut {
+        id,
+        ..shortcut.clone()
+    })
+}
+
+/// Fetches a single shortcut by id.
+pub fn get_shortcut(conn: &Connection, id: i64) -> Result<Option<Shortcut>> {
+    conn.query_row(
+        "SELECT id, alias, command, project_dir, git_repo, is_global, created_at
+         FROM shortcuts WHERE id = ?1",
+        params![id],
+        row_to_shortcut,
+    )
+    .optional()
+    .context("get shortcut failed")
+}
+
+/// Maps a rusqlite Row to a Shortcut.
+pub fn row_to_shortcut(row: &rusqlite::Row) -> rusqlite::Result<Shortcut> {
+    let created_at_str: String = row.get(6)?;
+    let created_at = created_at_str
+        .parse::<DateTime<Utc>>()
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(Shortcut {
+        id: row.get(0)?,
+        alias: row.get(1)?,
+        command: row.get(2)?,
+        project_dir: row.get(3)?,
+        git_repo: row.get(4)?,
+        is_global: row.get(5)?,
+        created_at,
     })
 }

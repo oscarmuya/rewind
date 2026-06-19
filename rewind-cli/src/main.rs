@@ -5,6 +5,10 @@ use std::process::ExitCode;
 mod cmd;
 mod tui;
 
+pub const RESERVED: &[&str] = &[
+    "run", "search", "status", "shortcut", "recent", "daemon", "init", "help",
+];
+
 #[derive(Debug, Parser)]
 #[command(
     name = "rw",
@@ -51,6 +55,13 @@ enum Commands {
 
     /// Start the background daemon.
     Daemon,
+
+    /// Manage command shortcuts.
+    Shortcut(cmd::shortcut::Args),
+
+    /// Catch-all for shortcut alias invocation.
+    #[command(external_subcommand)]
+    Alias(Vec<String>),
 }
 
 impl Commands {
@@ -73,6 +84,19 @@ impl Commands {
                 eprintln!("Use `rw-daemon` directly or let your shell init manage it.");
                 Ok(ExitCode::SUCCESS)
             }
+
+            Self::Shortcut(args) => cmd::shortcut::execute(args),
+            Self::Alias(args) => match cmd::shortcut::try_invoke_alias(&args)? {
+                Some(code) => Ok(code),
+                None => {
+                    let alias = args.first().map(String::as_str).unwrap_or("");
+                    eprintln!(
+                        "unknown command or shortcut `{alias}` -- \
+                 use `rw shortcut list` to see available shortcuts"
+                    );
+                    Ok(ExitCode::FAILURE)
+                }
+            },
         }
     }
 }
