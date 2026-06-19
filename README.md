@@ -250,6 +250,57 @@ In the TUI:
 - press `Esc` in the editor to cancel editing and return to search
 - press `Esc` or `Ctrl-C` in search to exit without selecting
 
+## Shortcuts
+
+Save frequently used commands as short aliases:
+
+```sh
+rw shortcut add [OPTIONS] <ALIAS> [COMMAND]
+```
+
+```sh
+rw shortcut add test cargo test
+rw shortcut add lint cargo clippy --workspace --all-targets
+```
+
+Shortcuts are scoped to the current project by default. Run a saved shortcut by
+passing its alias directly to `rw`:
+
+```sh
+rw test
+rw lint
+```
+
+Create a shortcut that is available from any project with `--global`:
+
+```sh
+rw shortcut add --global gs git status --short
+rw gs
+```
+
+List shortcuts for the current project, including global shortcuts:
+
+```sh
+rw shortcut list
+```
+
+List only global shortcuts:
+
+```sh
+rw shortcut list --global
+```
+
+Remove a shortcut:
+
+```sh
+rw shortcut remove test
+rw shortcut remove gs --global
+```
+
+Project shortcuts take precedence over global shortcuts with the same alias.
+Reserved `rw` subcommand names, such as `search`, `status`, and `shortcut`,
+cannot be used as shortcut aliases.
+
 ## Data Files
 
 On Linux, history is stored under:
@@ -260,7 +311,7 @@ ${XDG_DATA_HOME:-$HOME/.local/share}/rewind/
 
 The main files are:
 
-- `history.db`: SQLite database containing command history
+- `history.db`: SQLite database containing command history and shortcuts
 - `rewind.sock`: Unix socket used by `rw-daemon`
 
 The database uses SQLite WAL mode. Removing `history.db` deletes your recorded
