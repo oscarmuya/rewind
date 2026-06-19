@@ -14,6 +14,7 @@ use std::{
 };
 
 use crate::cmd::functions::rerun_entry;
+use crate::tui::FilterContext;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -54,6 +55,8 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let project_root_str = project_root.to_string_lossy().into_owned();
 
     let (git_repo, git_branch) = resolve_git(&cwd_str);
+    let context = FilterContext::new(&cwd_str, git_repo, git_branch);
+
     let mut filter = Filter::new()
         .limit(args.limit)
         .project_cwd(&project_root_str);
@@ -63,13 +66,13 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     }
 
     if args.repo
-        && let Some(repo) = git_repo
+        && let Some(repo) = &context.git_repo
     {
         filter = filter.git_repo(repo);
     }
 
     if args.branch
-        && let Some(branch) = git_branch
+        && let Some(branch) = &context.git_branch
     {
         filter = filter.git_branch(branch);
     }
@@ -83,16 +86,16 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     }
 
     let conn = db::open()?;
-    let entries = query::fetch(&conn, &filter)?;
 
     if !args.plain {
-        if let Some(entry) = crate::tui::run_recent(entries)? {
+        if let Some(entry) = crate::tui::run_recent(&conn, context, filter)? {
             return rerun_entry(&entry);
         }
 
         return Ok(ExitCode::SUCCESS);
     }
 
+    let entries = query::fetch(&conn, &filter)?;
     print_entries(&entries)?;
 
     Ok(ExitCode::SUCCESS)

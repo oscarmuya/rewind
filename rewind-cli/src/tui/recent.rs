@@ -16,7 +16,11 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph},
 };
 use ratatui_textarea::TextArea;
-use rewind_core::entry::Entry;
+use rewind_core::{
+    entry::Entry,
+    query::{self, Filter},
+};
+use rusqlite::Connection;
 
 use crate::tui::{
     shared::{editor_for_command, render_editor_modal, tui_background},
@@ -24,9 +28,38 @@ use crate::tui::{
 };
 
 use super::shared::{
-    CommandDisplay, Junction, command_item, context_bar, date_heading_item, empty_history_item,
-    list_block, selected_item_style, separator_line, top_bar,
+    CommandDisplay, FilterContext, FilterShortcut, FilterToggle, Junction, command_item,
+    context_bar, date_heading_item, empty_history_item, filter_footer, list_block,
+    selected_item_style, separator_line, toggle_filter, top_bar,
 };
+
+const FILTER_SHORTCUTS: &[FilterShortcut] = &[
+    FilterShortcut {
+        key: "c",
+        label: "cwd",
+        toggle: FilterToggle::Cwd,
+    },
+    FilterShortcut {
+        key: "r",
+        label: "repo",
+        toggle: FilterToggle::Repo,
+    },
+    FilterShortcut {
+        key: "b",
+        label: "branch",
+        toggle: FilterToggle::Branch,
+    },
+    FilterShortcut {
+        key: "o",
+        label: "ok",
+        toggle: FilterToggle::Ok,
+    },
+    FilterShortcut {
+        key: "f",
+        label: "fail",
+        toggle: FilterToggle::Fail,
+    },
+];
 
 struct MouseCaptureGuard;
 
@@ -55,18 +88,22 @@ struct EditedCommand {
     command: String,
 }
 
-struct App {
+struct App<'a> {
+    conn: &'a Connection,
     entries: Vec<Entry>,
     display_entries: Vec<CommandDisplay>,
     rows: Vec<Row>,
+    context: FilterContext,
+    filter: Filter,
     list_state: ListState,
     list_area: Rect,
     command_to_run: Option<EditedCommand>,
     edit_input: Option<TextArea<'static>>,
 }
 
-impl App {
-    fn new(entries: Vec<Entry>) -> Self {
+impl<'a> App<'a> {
+    fn new(conn: &'a Connection, context: FilterContext, filter: Filter) -> Result<Self> {
+        let entries = query::fetch(conn, &filter)?;
         let today = Local::now().date_naive();
 
         let display_entries = entries
@@ -74,20 +111,21 @@ impl App {
             .map(|entry| CommandDisplay::new(entry, today))
             .collect::<Vec<_>>();
 
-        let rows = grouped_rows(&display_entries);
-
         let mut app = Self {
+            conn,
             entries,
             display_entries,
-            rows,
+            rows: Vec::new(),
+            context,
+            filter,
             list_state: ListState::default(),
             list_area: Rect::default(),
             command_to_run: None,
             edit_input: None,
         };
 
-        app.select_first_entry();
-        app
+        app.rebuild_rows();
+        Ok(app)
     }
 
     fn is_editing(&self) -> bool {
@@ -112,6 +150,8 @@ impl App {
     fn select_first_entry(&mut self) {
         if let Some(row) = self.next_entry_row(0) {
             self.list_state.select(Some(row));
+        } else {
+            self.clear_selection();
         }
     }
 
@@ -180,6 +220,32 @@ impl App {
         self.edit_input = Some(editor_for_command(&entry.command));
     }
 
+    fn rebuild_rows(&mut self) {
+        self.rows = grouped_rows(&self.display_entries);
+        self.select_first_entry();
+    }
+
+    fn toggle_filter(&mut self, toggle: FilterToggle) -> Result<()> {
+        let mut filter = self.filter.clone();
+        toggle_filter(&mut filter, toggle, &self.context);
+
+        if filter == self.filter {
+            return Ok(());
+        }
+
+        let entries = query::fetch(self.conn, &filter)?;
+        let today = Local::now().date_naive();
+
+        self.display_entries = entries
+            .iter()
+            .map(|entry| CommandDisplay::new(entry, today))
+            .collect();
+        self.entries = entries;
+        self.filter = filter;
+        self.rebuild_rows();
+        Ok(())
+    }
+
     fn cancel_edit(&mut self) {
         // Close modal and return to the list without changing the command.
         self.edit_input = None;
@@ -222,9 +288,9 @@ impl App {
     }
 }
 
-pub fn run(entries: Vec<Entry>) -> Result<Option<Entry>> {
+pub fn run(conn: &Connection, context: FilterContext, filter: Filter) -> Result<Option<Entry>> {
     let _mouse = MouseCaptureGuard::enable()?;
-    let mut app = App::new(entries);
+    let mut app = App::new(conn, context, filter)?;
     init_theme();
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
@@ -248,7 +314,7 @@ pub fn run(entries: Vec<Entry>) -> Result<Option<Entry>> {
     Ok(entry)
 }
 
-fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+fn event_loop(terminal: &mut DefaultTerminal, app: &mut App<'_>) -> Result<()> {
     loop {
         terminal.draw(|frame| ui(frame, app))?;
 
@@ -259,7 +325,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     if handle_editor_key(app, key) {
                         return Ok(());
                     }
-                } else if handle_list_key(app, key) {
+                } else if handle_list_key(app, key)? {
                     // Normal list navigation when the modal is closed.
                     return Ok(());
                 }
@@ -270,7 +336,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     }
 }
 
-fn handle_editor_key(app: &mut App, key: KeyEvent) -> bool {
+fn handle_editor_key(app: &mut App<'_>, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.cancel_edit();
@@ -296,42 +362,62 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-fn handle_list_key(app: &mut App, key: KeyEvent) -> bool {
+fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc => {
             app.clear_selection();
-            true
+            Ok(true)
         }
         KeyCode::Enter => {
             // Open edit modal pre-populated with the selected command.
             app.open_editor_for_selected_entry();
-            false
+            Ok(false)
         }
         KeyCode::Down => {
             app.move_down();
-            false
+            Ok(false)
         }
         KeyCode::Up => {
             app.move_up();
-            false
+            Ok(false)
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.clear_selection();
-            true
+            Ok(true)
         }
         KeyCode::Char('j') if key.modifiers.is_empty() => {
             app.move_down();
-            false
+            Ok(false)
         }
         KeyCode::Char('k') if key.modifiers.is_empty() => {
             app.move_up();
-            false
+            Ok(false)
         }
-        _ => false,
+        KeyCode::Char('c') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Cwd)?;
+            Ok(false)
+        }
+        KeyCode::Char('r') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Repo)?;
+            Ok(false)
+        }
+        KeyCode::Char('b') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Branch)?;
+            Ok(false)
+        }
+        KeyCode::Char('o') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Ok)?;
+            Ok(false)
+        }
+        KeyCode::Char('f') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Fail)?;
+            Ok(false)
+        }
+        _ => Ok(false),
     }
 }
 
-fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+fn handle_mouse_event(app: &mut App<'_>, mouse: MouseEvent) {
     if app.is_editing() {
         return;
     }
@@ -346,7 +432,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
 }
 
-fn ui(frame: &mut Frame, app: &mut App) {
+fn ui(frame: &mut Frame, app: &mut App<'_>) {
     frame.render_widget(tui_background(), frame.area());
 
     let padded_area = Layout::default()
@@ -361,7 +447,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Constraint::Length(1), // context
             Constraint::Length(1), // separator line
             Constraint::Min(1),    // command list
-            Constraint::Length(1), // bottom separator / blank space
+            Constraint::Length(3), // filter footer
         ])
         .split(padded_area);
 
@@ -369,7 +455,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
     render_context_bar(frame, app, chunks[1]);
     render_separator(frame, chunks[2], chunks[1].width, Junction::Top);
     render_history_list(frame, app, chunks[3]);
-    render_separator(frame, chunks[4], chunks[1].width, Junction::Bottom);
+    render_filter_footer(frame, app, chunks[4]);
 
     if let Some(textarea) = app.edit_input.as_mut() {
         render_editor_modal(frame, textarea);
@@ -381,7 +467,7 @@ fn render_top_bar(frame: &mut Frame, area: Rect) {
     frame.render_widget(top, area);
 }
 
-fn render_context_bar(frame: &mut Frame, app: &App, area: Rect) {
+fn render_context_bar(frame: &mut Frame, app: &App<'_>, area: Rect) {
     let detail = Paragraph::new(context_bar(app.selected_entry())).style(Style::default());
     frame.render_widget(detail, area);
 }
@@ -391,7 +477,12 @@ fn render_separator(frame: &mut Frame, area: Rect, width: u16, junction: Junctio
     frame.render_widget(separator, area);
 }
 
-fn render_history_list(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_filter_footer(frame: &mut Frame, app: &App<'_>, area: Rect) {
+    let footer = filter_footer(area.width, &app.filter, &app.context, FILTER_SHORTCUTS);
+    frame.render_widget(footer, area);
+}
+
+fn render_history_list(frame: &mut Frame, app: &mut App<'_>, area: Rect) {
     app.list_area = area;
 
     let items = history_items(&app.rows, &app.entries, &app.display_entries);

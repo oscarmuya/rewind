@@ -4,11 +4,12 @@ use anyhow::Result;
 use clap::Args as ClapArgs;
 use rewind_core::{
     db,
-    functions::{find_project_root, get_cwd},
+    functions::{find_project_root, get_cwd, resolve_git},
     fuzzy, query,
 };
 
 use crate::cmd::functions::rerun_entry;
+use crate::tui::FilterContext;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -45,8 +46,11 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
         // Interactive TUI -- term is the pre-populated query or empty.
         (term, false) => {
             let initial = term.unwrap_or_default();
+            let cwd_str = cwd.to_string_lossy().into_owned();
+            let (git_repo, git_branch) = resolve_git(&cwd_str);
+            let context = FilterContext::new(cwd_str, git_repo, git_branch);
 
-            if let Some(entry) = crate::tui::run(&conn, &project_root_str, &initial)? {
+            if let Some(entry) = crate::tui::run(&conn, &project_root_str, &initial, context)? {
                 return rerun_entry(&entry);
             }
         }
