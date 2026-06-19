@@ -5,7 +5,7 @@ use crate::db::row_to_entry;
 use crate::entry::Entry;
 
 /// Builder for filtering history queries.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Filter {
     pub cwd: Option<String>,
     pub project_cwd: Option<String>,

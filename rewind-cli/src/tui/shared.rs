@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Clear, ListItem, Padding, Paragraph},
 };
 use ratatui_textarea::{CursorMove, TextArea};
-use rewind_core::entry::Entry;
+use rewind_core::{entry::Entry, query::Filter};
 
 use crate::tui::themes::THEME;
 
@@ -20,8 +20,7 @@ const EDIT_MODAL_HEIGHT: u16 = 8;
 static HOME: OnceLock<Option<String>> = OnceLock::new();
 
 pub enum Junction {
-    Top,    // ┬
-    Bottom, // ┴
+    Top, // ┬
 }
 
 pub struct CommandDisplay {
@@ -45,6 +44,76 @@ impl CommandDisplay {
             branch: format_branch_label(entry.git_branch.as_deref()),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FilterContext {
+    pub cwd: String,
+    pub git_repo: Option<String>,
+    pub git_branch: Option<String>,
+}
+
+impl FilterContext {
+    pub fn new(
+        cwd: impl Into<String>,
+        git_repo: Option<String>,
+        git_branch: Option<String>,
+    ) -> Self {
+        Self {
+            cwd: cwd.into(),
+            git_repo,
+            git_branch,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FilterToggle {
+    Cwd,
+    Repo,
+    Branch,
+    Ok,
+    Fail,
+}
+
+pub fn toggle_filter(filter: &mut Filter, toggle: FilterToggle, context: &FilterContext) {
+    match toggle {
+        FilterToggle::Cwd => {
+            filter.cwd = filter.cwd.is_none().then(|| context.cwd.clone());
+        }
+        FilterToggle::Repo if context.git_repo.is_some() => {
+            filter.git_repo = match filter.git_repo {
+                Some(_) => None,
+                None => context.git_repo.clone(),
+            };
+        }
+        FilterToggle::Branch if context.git_branch.is_some() => {
+            filter.git_branch = match filter.git_branch {
+                Some(_) => None,
+                None => context.git_branch.clone(),
+            };
+        }
+        FilterToggle::Repo | FilterToggle::Branch => {}
+        FilterToggle::Ok => {
+            filter.only_success = !filter.only_success;
+            if filter.only_success {
+                filter.only_failure = false;
+            }
+        }
+        FilterToggle::Fail => {
+            filter.only_failure = !filter.only_failure;
+            if filter.only_failure {
+                filter.only_success = false;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FilterShortcut {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub toggle: FilterToggle,
 }
 
 pub fn selected_item_style() -> Style {
@@ -144,7 +213,6 @@ pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
 pub fn separator_line(width: u16, junction: Junction) -> Line<'static> {
     let junction = match junction {
         Junction::Top => "┬",
-        Junction::Bottom => "┴",
     };
 
     h_line(width, junction)
@@ -222,6 +290,43 @@ pub fn editor_footer(width: u16) -> Paragraph<'static> {
     ]);
 
     Paragraph::new(vec![h_line(width, "┬"), input, h_line(width, "┴")])
+}
+
+pub fn filter_footer(
+    width: u16,
+    filter: &Filter,
+    context: &FilterContext,
+    shortcuts: &[FilterShortcut],
+) -> Paragraph<'static> {
+    let mut spans = vec![
+        gutter_label(""),
+        border_span("│"),
+        Span::styled(
+            " Filters ",
+            Style::default()
+                .fg(THEME.heading)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("· ", Style::default().fg(THEME.subtle)),
+    ];
+
+    for (index, shortcut) in shortcuts.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+
+        spans.push(Span::styled(
+            format!("[{}] ", shortcut.key),
+            Style::default().fg(THEME.subtle),
+        ));
+        spans.push(filter_label(shortcut, filter, context));
+    }
+
+    Paragraph::new(vec![
+        h_line(width, "┼"),
+        Line::from(spans),
+        h_line(width, "┴"),
+    ])
 }
 
 pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>) {
@@ -388,10 +493,106 @@ fn border_span<'a>(content: impl Into<std::borrow::Cow<'a, str>>) -> Span<'a> {
     Span::styled(content.into(), Style::default().fg(THEME.border))
 }
 
+fn filter_label(
+    shortcut: &FilterShortcut,
+    filter: &Filter,
+    context: &FilterContext,
+) -> Span<'static> {
+    let is_active = match shortcut.toggle {
+        FilterToggle::Cwd => filter.cwd.is_some(),
+        FilterToggle::Repo => filter.git_repo.is_some(),
+        FilterToggle::Branch => filter.git_branch.is_some(),
+        FilterToggle::Ok => filter.only_success,
+        FilterToggle::Fail => filter.only_failure,
+    };
+
+    let is_available = match shortcut.toggle {
+        FilterToggle::Repo => context.git_repo.is_some(),
+        FilterToggle::Branch => context.git_branch.is_some(),
+        FilterToggle::Cwd | FilterToggle::Ok | FilterToggle::Fail => true,
+    };
+
+    let style = if is_active {
+        Style::default()
+            .fg(THEME.branch_text)
+            .bg(THEME.branch_bg)
+            .add_modifier(Modifier::BOLD)
+    } else if is_available {
+        Style::default().fg(THEME.muted)
+    } else {
+        Style::default().fg(THEME.subtle)
+    };
+
+    let label = if is_active {
+        format!(" {} ", shortcut.label)
+    } else if is_available {
+        shortcut.label.to_owned()
+    } else {
+        format!("{} n/a", shortcut.label)
+    };
+
+    Span::styled(label, style)
+}
+
 fn command_lines(command: &str) -> Vec<String> {
     if command.is_empty() {
         return vec![String::new()];
     }
 
     command.lines().map(str::to_owned).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> FilterContext {
+        FilterContext::new(
+            "/workspace/repo/crate",
+            Some("/workspace/repo".to_owned()),
+            Some("main".to_owned()),
+        )
+    }
+
+    #[test]
+    fn toggles_apply_current_context_without_changing_limit() {
+        let context = context();
+        let mut filter = Filter::new().limit(25);
+
+        toggle_filter(&mut filter, FilterToggle::Cwd, &context);
+        toggle_filter(&mut filter, FilterToggle::Repo, &context);
+        toggle_filter(&mut filter, FilterToggle::Branch, &context);
+        toggle_filter(&mut filter, FilterToggle::Ok, &context);
+
+        assert_eq!(filter.cwd.as_deref(), Some("/workspace/repo/crate"));
+        assert_eq!(filter.git_repo.as_deref(), Some("/workspace/repo"));
+        assert_eq!(filter.git_branch.as_deref(), Some("main"));
+        assert!(filter.only_success);
+        assert!(!filter.only_failure);
+        assert_eq!(filter.limit, Some(25));
+    }
+
+    #[test]
+    fn success_and_failure_filters_are_exclusive_when_toggled() {
+        let context = context();
+        let mut filter = Filter::new();
+
+        toggle_filter(&mut filter, FilterToggle::Ok, &context);
+        toggle_filter(&mut filter, FilterToggle::Fail, &context);
+
+        assert!(!filter.only_success);
+        assert!(filter.only_failure);
+    }
+
+    #[test]
+    fn unavailable_git_filters_do_not_activate() {
+        let context = FilterContext::new("/workspace", None, None);
+        let mut filter = Filter::new();
+
+        toggle_filter(&mut filter, FilterToggle::Repo, &context);
+        toggle_filter(&mut filter, FilterToggle::Branch, &context);
+
+        assert!(filter.git_repo.is_none());
+        assert!(filter.git_branch.is_none());
+    }
 }
