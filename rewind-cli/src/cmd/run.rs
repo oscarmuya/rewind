@@ -3,7 +3,7 @@ use clap::Args as ClapArgs;
 use std::{process::ExitCode, time::Instant};
 
 use crate::cmd::functions::{
-    exit_code_to_process_code, persist_direct, run_command, send_to_daemon,
+    exit_code_to_process_code, parse_cmd_args, persist_direct, run_command, send_to_daemon,
 };
 use rewind_core::functions::get_cwd;
 
@@ -17,12 +17,7 @@ pub struct Args {
 pub fn execute(args: Args) -> Result<ExitCode> {
     let cwd = get_cwd().to_string_lossy().into_owned();
 
-    let command_str = args
-        .cmd
-        .iter()
-        .map(|arg| shell_quote(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let command_str = parse_cmd_args(&args.cmd);
 
     // Execute the command first; persistence should not affect command execution.
     let start = Instant::now();
@@ -37,9 +32,4 @@ pub fn execute(args: Args) -> Result<ExitCode> {
     }
 
     Ok(exit_code_to_process_code(exit_code))
-}
-
-/// Wrap in single quotes, escaping any single quotes within
-fn shell_quote(arg: &str) -> String {
-    format!("'{}'", arg.replace('\'', "'\\''"))
 }
