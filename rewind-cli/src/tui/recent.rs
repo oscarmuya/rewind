@@ -9,6 +9,7 @@ use crossterm::{
     },
     execute,
 };
+use nucleo_matcher::{Config, Matcher};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -18,6 +19,7 @@ use ratatui::{
 use ratatui_textarea::TextArea;
 use rewind_core::{
     entry::Entry,
+    fuzzy,
     query::{self, Filter},
 };
 use rusqlite::Connection;
@@ -29,9 +31,11 @@ use crate::tui::{
 
 use super::shared::{
     CommandDisplay, FilterContext, FilterShortcut, FilterToggle, Junction, command_item,
-    context_bar, date_heading_item, empty_history_item, filter_footer, list_block,
-    selected_item_style, separator_line, toggle_filter, top_bar,
+    context_bar, date_heading_item, empty_history_item, filter_footer, list_block, search_bar,
+    search_footer, selected_item_style, separator_line, toggle_filter, top_bar,
 };
+
+const TUI_ENTRY_LIMIT: usize = 10_000;
 
 const FILTER_SHORTCUTS: &[FilterShortcut] = &[
     FilterShortcut {
@@ -92,6 +96,7 @@ struct App<'a> {
     conn: &'a Connection,
     entries: Vec<Entry>,
     display_entries: Vec<CommandDisplay>,
+    visible_entries: Vec<usize>,
     rows: Vec<Row>,
     context: FilterContext,
     filter: Filter,
@@ -99,6 +104,9 @@ struct App<'a> {
     list_area: Rect,
     command_to_run: Option<EditedCommand>,
     edit_input: Option<TextArea<'static>>,
+    search_mode: bool,
+    search_query: String,
+    matcher: Matcher,
 }
 
 impl<'a> App<'a> {
@@ -115,6 +123,7 @@ impl<'a> App<'a> {
             conn,
             entries,
             display_entries,
+            visible_entries: Vec::new(),
             rows: Vec::new(),
             context,
             filter,
@@ -122,6 +131,9 @@ impl<'a> App<'a> {
             list_area: Rect::default(),
             command_to_run: None,
             edit_input: None,
+            search_mode: false,
+            search_query: String::new(),
+            matcher: Matcher::new(Config::DEFAULT),
         };
 
         app.rebuild_rows();
@@ -130,6 +142,47 @@ impl<'a> App<'a> {
 
     fn is_editing(&self) -> bool {
         self.edit_input.is_some()
+    }
+
+    fn enter_search_mode(&mut self) {
+        self.search_mode = true;
+        self.refilter();
+    }
+
+    fn cancel_search_mode(&mut self) {
+        self.search_mode = false;
+        self.search_query.clear();
+        self.refilter();
+    }
+
+    fn push_search_char(&mut self, character: char) {
+        self.search_query.push(character);
+        self.refilter();
+    }
+
+    fn pop_search_char(&mut self) {
+        if self.search_query.pop().is_some() {
+            self.refilter();
+        }
+    }
+
+    fn refilter(&mut self) {
+        self.visible_entries = if self.search_query.is_empty() {
+            (0..self.entries.len()).collect()
+        } else {
+            fuzzy::search_fuzzy_indices(
+                &mut self.matcher,
+                &self.entries,
+                &self.search_query,
+                TUI_ENTRY_LIMIT,
+            )
+        };
+        self.rows = grouped_rows(
+            &self.display_entries,
+            &self.visible_entries,
+            self.search_query.is_empty(),
+        );
+        self.select_first_entry();
     }
 
     fn selected_entry_index(&self) -> Option<usize> {
@@ -221,8 +274,7 @@ impl<'a> App<'a> {
     }
 
     fn rebuild_rows(&mut self) {
-        self.rows = grouped_rows(&self.display_entries);
-        self.select_first_entry();
+        self.refilter();
     }
 
     fn toggle_filter(&mut self, toggle: FilterToggle) -> Result<()> {
@@ -325,8 +377,11 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App<'_>) -> Result<()> {
                     if handle_editor_key(app, key) {
                         return Ok(());
                     }
+                } else if app.search_mode {
+                    if handle_search_key(app, key) {
+                        return Ok(());
+                    }
                 } else if handle_list_key(app, key)? {
-                    // Normal list navigation when the modal is closed.
                     return Ok(());
                 }
             }
@@ -334,6 +389,29 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App<'_>) -> Result<()> {
             _ => {}
         }
     }
+}
+
+fn handle_search_key(app: &mut App<'_>, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Esc => app.cancel_search_mode(),
+        KeyCode::Enter => app.open_editor_for_selected_entry(),
+        KeyCode::Down => app.move_down(),
+        KeyCode::Up => app.move_up(),
+        KeyCode::Backspace => app.pop_search_char(),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_selection();
+            return true;
+        }
+        KeyCode::Char(character)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            app.push_search_char(character);
+        }
+        _ => {}
+    }
+
+    false
 }
 
 fn handle_editor_key(app: &mut App<'_>, key: KeyEvent) -> bool {
@@ -364,6 +442,10 @@ fn handle_editor_key(app: &mut App<'_>, key: KeyEvent) -> bool {
 
 fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
     match key.code {
+        KeyCode::Char('/') if key.modifiers.is_empty() => {
+            app.enter_search_mode();
+            Ok(false)
+        }
         KeyCode::Esc => {
             app.clear_selection();
             Ok(true)
@@ -451,15 +533,32 @@ fn ui(frame: &mut Frame, app: &mut App<'_>) {
         ])
         .split(padded_area);
 
-    render_top_bar(frame, chunks[0]);
+    if app.search_mode {
+        render_search_bar(frame, app, chunks[0]);
+    } else {
+        render_top_bar(frame, chunks[0]);
+    }
     render_context_bar(frame, app, chunks[1]);
     render_separator(frame, chunks[2], chunks[1].width, Junction::Top);
     render_history_list(frame, app, chunks[3]);
-    render_filter_footer(frame, app, chunks[4]);
+    if app.search_mode {
+        render_search_footer(frame, chunks[4]);
+    } else {
+        render_filter_footer(frame, app, chunks[4]);
+    }
 
     if let Some(textarea) = app.edit_input.as_mut() {
         render_editor_modal(frame, textarea);
     }
+}
+
+fn render_search_bar(frame: &mut Frame, app: &App<'_>, area: Rect) {
+    let search = Paragraph::new(search_bar(
+        &app.search_query,
+        app.visible_entries.len(),
+        area.width,
+    ));
+    frame.render_widget(search, area);
 }
 
 fn render_top_bar(frame: &mut Frame, area: Rect) {
@@ -480,6 +579,10 @@ fn render_separator(frame: &mut Frame, area: Rect, width: u16, junction: Junctio
 fn render_filter_footer(frame: &mut Frame, app: &App<'_>, area: Rect) {
     let footer = filter_footer(area.width, &app.filter, &app.context, FILTER_SHORTCUTS);
     frame.render_widget(footer, area);
+}
+
+fn render_search_footer(frame: &mut Frame, area: Rect) {
+    frame.render_widget(search_footer(area.width), area);
 }
 
 fn render_history_list(frame: &mut Frame, app: &mut App<'_>, area: Rect) {
@@ -513,15 +616,22 @@ fn history_items<'a>(
         .collect()
 }
 
-fn grouped_rows(display_entries: &[CommandDisplay]) -> Vec<Row> {
-    let mut rows = Vec::with_capacity(display_entries.len().saturating_mul(2));
+fn grouped_rows(
+    display_entries: &[CommandDisplay],
+    visible_entries: &[usize],
+    show_dates: bool,
+) -> Vec<Row> {
+    let mut rows = Vec::with_capacity(visible_entries.len().saturating_mul(2));
     let mut last_heading = None;
 
-    for (index, display) in display_entries.iter().enumerate() {
+    for &index in visible_entries {
+        let display = &display_entries[index];
         let heading = display.heading.as_str();
 
         if last_heading != Some(heading) {
-            rows.push(Row::Header(display.heading.clone()));
+            if show_dates {
+                rows.push(Row::Header(display.heading.clone()));
+            }
             last_heading = Some(heading);
         }
 
@@ -529,4 +639,91 @@ fn grouped_rows(display_entries: &[CommandDisplay]) -> Vec<Row> {
     }
 
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+    use rewind_core::db;
+
+    fn connection_with_entries() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                project_cwd TEXT NOT NULL,
+                git_repo TEXT,
+                git_branch TEXT,
+                exit_code INTEGER,
+                duration_ms INTEGER,
+                started_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        db::insert(
+            &conn,
+            &Entry::new("git status", "/project", "/project", None, None),
+        )
+        .unwrap();
+        db::insert(
+            &conn,
+            &Entry::new("cargo test", "/project", "/project", None, None),
+        )
+        .unwrap();
+        conn
+    }
+
+    fn app(conn: &Connection) -> App<'_> {
+        App::new(conn, FilterContext::default(), Filter::new().limit(500)).unwrap()
+    }
+
+    #[test]
+    fn slash_enters_search_and_escape_clears_and_cancels() {
+        let conn = connection_with_entries();
+        let mut app = app(&conn);
+
+        assert!(
+            !handle_list_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)
+            )
+            .unwrap()
+        );
+        assert!(app.search_mode);
+
+        for character in ['g', 'i', 't'] {
+            assert!(!handle_search_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            ));
+        }
+        assert_eq!(app.search_query, "git");
+        assert_eq!(app.visible_entries.len(), 1);
+
+        assert!(!handle_search_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        ));
+        assert!(!app.search_mode);
+        assert!(app.search_query.is_empty());
+        assert_eq!(app.visible_entries.len(), 2);
+    }
+
+    #[test]
+    fn enter_opens_the_selected_search_result_in_the_editor() {
+        let conn = connection_with_entries();
+        let mut app = app(&conn);
+        app.enter_search_mode();
+
+        assert!(!handle_search_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ));
+        assert!(app.is_editing());
+        assert!(app.command_to_run.is_none());
+    }
 }
