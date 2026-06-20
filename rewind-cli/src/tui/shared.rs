@@ -329,6 +329,21 @@ pub fn filter_footer(
     ])
 }
 
+pub fn search_footer(width: u16) -> Paragraph<'static> {
+    let input = Line::from(vec![
+        gutter_label(""),
+        border_span("│"),
+        Span::styled(" [esc] ", Style::default().fg(THEME.subtle)),
+        Span::styled("cancel", Style::default().fg(THEME.text)),
+        Span::styled("  [enter] ", Style::default().fg(THEME.subtle)),
+        Span::styled("select", Style::default().fg(THEME.text)),
+        Span::styled("  [↑/↓] ", Style::default().fg(THEME.subtle)),
+        Span::styled("navigate", Style::default().fg(THEME.text)),
+    ]);
+
+    Paragraph::new(vec![h_line(width, "┼"), input, h_line(width, "┴")])
+}
+
 pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>) {
     let screen_area = frame.area();
 

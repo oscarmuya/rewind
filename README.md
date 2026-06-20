@@ -213,6 +213,8 @@ rw --repo --branch --fail --limit 10
 In the recent-command TUI:
 
 - use `Up`/`Down` or `k`/`j` to move
+- press `/` to enter search mode and type to filter commands
+- in search mode, use `[↑/↓]` to navigate and press `Esc` to clear the query and return to the list
 - click a command or press `Enter` to open it in the replay editor
 - edit the command, then press `Enter` to run it
 - press `Alt+Enter` in the editor to insert a newline for multiline commands
