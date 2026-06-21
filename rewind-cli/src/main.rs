@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 mod cmd;
@@ -102,11 +103,95 @@ impl Commands {
 }
 
 fn main() -> ExitCode {
-    match Cli::parse().execute() {
+    match Cli::parse_from(normalize_recent_selector(std::env::args_os())).execute() {
         Ok(code) => code,
         Err(error) => {
             eprintln!("{error:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn normalize_recent_selector(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let mut args: Vec<_> = args.into_iter().collect();
+    let mut index = 1;
+    let mut explicit_recent = false;
+
+    while let Some(arg) = args.get(index).and_then(|arg| arg.to_str()) {
+        if arg == "recent" && !explicit_recent {
+            explicit_recent = true;
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg
+            .strip_prefix('-')
+            .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .map(str::to_owned)
+        {
+            let mut replacement = vec![OsString::from("recent")];
+            replacement.extend(
+                args[1..index]
+                    .iter()
+                    .filter(|arg| arg.as_os_str() != "recent")
+                    .cloned(),
+            );
+            replacement.extend([OsString::from("--index"), value.into()]);
+            args.splice(1..=index, replacement);
+            break;
+        }
+
+        match arg {
+            "-l" | "--limit" => index += 2,
+            "--cwd" | "--repo" | "--branch" | "--ok" | "--fail" | "--deleted" | "--plain" => {
+                index += 1
+            }
+            _ if arg.starts_with("--limit=") || arg.starts_with("-l") => index += 1,
+            _ => break,
+        }
+    }
+
+    args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands, normalize_recent_selector};
+    use clap::Parser;
+    use std::ffi::OsString;
+
+    #[test]
+    fn normalizes_recent_selector_with_filters() {
+        let args = ["rw", "--repo", "-2", "--plain", "--ok"].map(OsString::from);
+        let normalized = normalize_recent_selector(args);
+
+        assert_eq!(
+            normalized,
+            ["rw", "recent", "--repo", "--index", "2", "--plain", "--ok"].map(OsString::from)
+        );
+
+        let cli = Cli::try_parse_from(normalized).unwrap();
+        let Some(Commands::Recent(args)) = cli.command else {
+            panic!("expected recent command");
+        };
+        assert_eq!(args.index, Some(2));
+        assert!(args.repo && args.plain && args.ok);
+    }
+
+    #[test]
+    fn normalizes_selector_for_recent_subcommand() {
+        let args = ["rw", "recent", "--limit", "20", "-2"].map(OsString::from);
+
+        assert_eq!(
+            normalize_recent_selector(args),
+            ["rw", "recent", "--limit", "20", "--index", "2"].map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn leaves_command_arguments_unchanged() {
+        let args = ["rw", "run", "echo", "-2"].map(OsString::from);
+
+        assert_eq!(normalize_recent_selector(args.clone()), args);
     }
 }
