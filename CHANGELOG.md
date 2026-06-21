@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.7.0 - 2026-06-22
+
+### Added
+
+- Added interactive shortcut management, including a dedicated shortcut TUI.
+- Added soft deletion and restoration for command history entries.
+- Added direct replay of recent commands by index, such as `rw -1`.
+- Added short option aliases for history filters and shortcut commands.
+- Added structured GitHub issue templates for bugs, features, and documentation.
+
+### Changed
+
+- Collapsed repeated commands in the history TUI.
+- Consolidated recent history and search into one interactive interface.
+- Made recent history the default `rw` experience and removed the `recent` subcommand.
+- Improved installer output and progress reporting.
+
+## v0.6.0 - 2026-06-21
+
+### Added
+
+- Added adaptive light and dark TUI themes.
+- Added command shortcuts and alias invocation.
+- Added interactive history filters and an in-place search mode to recent history.
+
+### Changed
+
+- Reused the command argument parser across CLI entry points.
+
+## v0.5.0 - 2026-06-18
+
+### Added
+
+- Added a replay editor so commands can be changed before execution.
+- Added shared history TUI chrome and documented its editor controls.
+
+### Changed
+
+- Cached command display metadata to improve TUI performance.
+
+## v0.4.0 - 2026-06-16
+
+### Added
+
+- Added fuzzy history search scoped to the current project root.
+- Added the rewind logo and expanded command-editing documentation.
+
+### Fixed
+
+- Improved fuzzy-search rerun behavior.
+
+## v0.3.0 - 2026-06-15
+
+### Added
+
+- Added automatic binary updates when running the installer again.
+- Added working-directory filtering for recent commands.
+- Added shell-context command execution support.
+
+### Changed
+
+- Persisted and scoped history at Git project roots.
+- Improved recent-command reruns.
+
+### Fixed
+
+- Prevented already-parsed command arguments from being tokenized again.
+
 ## v0.2.0 - 2026-06-15
 
 ### Added

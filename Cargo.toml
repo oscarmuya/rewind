@@ -2,6 +2,10 @@
 resolver = '3'
 members = [ "rewind-core", "rewind-daemon", "rewind-cli"]
 
+[workspace.package]
+version = "0.7.0"
+edition = "2024"
+
 [workspace.dependencies]
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
