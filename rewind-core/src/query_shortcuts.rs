@@ -191,6 +191,17 @@ pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     Ok(affected > 0)
 }
 
+/// Updates the command for a shortcut by id. Returns true if a row was updated.
+pub fn update_command(conn: &Connection, id: i64, command: &str) -> Result<bool> {
+    let affected = conn
+        .execute(
+            "UPDATE shortcuts SET command = ?1 WHERE id = ?2",
+            rusqlite::params![command, id],
+        )
+        .context("update shortcut failed")?;
+    Ok(affected > 0)
+}
+
 /// Returns all shortcuts for the given project, including globals.
 pub fn for_project(conn: &Connection, project_dir: &str) -> Result<Vec<Shortcut>> {
     fetch(
@@ -204,4 +215,42 @@ pub fn for_project(conn: &Connection, project_dir: &str) -> Result<Vec<Shortcut>
 /// Returns all global shortcuts.
 pub fn globals(conn: &Connection) -> Result<Vec<Shortcut>> {
     fetch(conn, &ShortcutFilter::new().only_global())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{db, shortcut::Shortcut};
+
+    #[test]
+    fn updates_shortcut_command() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE shortcuts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alias TEXT NOT NULL,
+                command TEXT NOT NULL,
+                project_dir TEXT NOT NULL,
+                git_repo TEXT,
+                is_global BOOLEAN DEFAULT FALSE,
+                created_at DATETIME NOT NULL,
+                UNIQUE(alias, project_dir)
+            );",
+        )
+        .unwrap();
+        let shortcut = db::insert_shortcut(
+            &conn,
+            &Shortcut::new("test", "cargo test", "/project", None, false),
+        )
+        .unwrap();
+
+        assert!(update_command(&conn, shortcut.id, "cargo test --workspace").unwrap());
+        assert_eq!(
+            db::get_shortcut(&conn, shortcut.id)
+                .unwrap()
+                .unwrap()
+                .command,
+            "cargo test --workspace"
+        );
+    }
 }
