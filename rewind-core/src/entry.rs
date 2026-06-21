@@ -30,6 +30,12 @@ pub struct Entry {
 
     /// UTC timestamp when the command started.
     pub started_at: DateTime<Utc>,
+
+    /// Whether this entry has been soft-deleted.
+    pub deleted: bool,
+
+    /// UTC timestamp when the entry was soft-deleted.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl Entry {
@@ -50,6 +56,8 @@ impl Entry {
             exit_code: None,
             duration_ms: None,
             started_at: Utc::now(),
+            deleted: false,
+            deleted_at: None,
         }
     }
 

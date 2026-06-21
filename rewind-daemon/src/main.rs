@@ -78,6 +78,8 @@ async fn handle(stream: UnixStream) -> Result<()> {
             exit_code: Some(payload.exit_code),
             duration_ms: Some(payload.duration_ms),
             started_at: chrono::Utc::now(),
+            deleted: false,
+            deleted_at: None,
         };
 
         // DB open per-write is fine here; WAL mode keeps it fast.

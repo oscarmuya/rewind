@@ -66,6 +66,11 @@ const FILTER_SHORTCUTS: &[FilterShortcut] = &[
         label: "fail",
         toggle: FilterToggle::Fail,
     },
+    FilterShortcut {
+        key: "x",
+        label: "deleted",
+        toggle: FilterToggle::Deleted,
+    },
 ];
 
 struct MouseCaptureGuard;
@@ -121,6 +126,7 @@ struct App<'a> {
     search_mode: bool,
     search_query: String,
     matcher: Matcher,
+    delete_pending: bool,
 }
 
 impl<'a> App<'a> {
@@ -151,6 +157,7 @@ impl<'a> App<'a> {
             search_mode,
             search_query: initial_query.unwrap_or_default(),
             matcher: Matcher::new(Config::DEFAULT),
+            delete_pending: false,
         };
 
         app.refilter();
@@ -215,31 +222,38 @@ impl<'a> App<'a> {
 
     fn select_first_entry(&mut self) {
         if let Some(row) = self.next_entry_row(0) {
-            self.list_state.select(Some(row));
+            self.select_row(Some(row));
         } else {
             self.clear_selection();
         }
     }
 
+    fn select_row(&mut self, row: Option<usize>) {
+        self.delete_pending = false;
+        self.list_state.select(row);
+    }
+
     fn clear_selection(&mut self) {
-        self.list_state.select(None);
+        self.select_row(None);
     }
 
     fn move_down(&mut self) {
+        self.delete_pending = false;
         let Some(selected) = self.list_state.selected() else {
             self.select_first_entry();
             return;
         };
 
         if let Some(row) = self.next_entry_row(selected.saturating_add(1)) {
-            self.list_state.select(Some(row));
+            self.select_row(Some(row));
         }
     }
 
     fn move_up(&mut self) {
+        self.delete_pending = false;
         let Some(selected) = self.list_state.selected() else {
             if let Some(row) = self.previous_entry_row(self.rows.len().saturating_sub(1)) {
-                self.list_state.select(Some(row));
+                self.select_row(Some(row));
             }
             return;
         };
@@ -249,7 +263,7 @@ impl<'a> App<'a> {
         }
 
         if let Some(row) = self.previous_entry_row(selected - 1) {
-            self.list_state.select(Some(row));
+            self.select_row(Some(row));
         }
     }
 
@@ -271,7 +285,7 @@ impl<'a> App<'a> {
         let row_index = self.list_state.offset().saturating_add(visible_offset);
 
         if self.rows.get(row_index).is_some() {
-            self.list_state.select(Some(row_index));
+            self.select_row(Some(row_index));
             return true;
         }
 
@@ -300,6 +314,34 @@ impl<'a> App<'a> {
         self.filter = filter;
         self.expanded_groups.clear();
         self.refilter();
+        Ok(())
+    }
+
+    fn toggle_deleted_selected(&mut self) -> Result<()> {
+        let Some(selected_row) = self.list_state.selected() else {
+            return Ok(());
+        };
+        let Some(entry_id) = self.selected_entry().map(|entry| entry.id) else {
+            return Ok(());
+        };
+
+        let changed = if self.filter.only_deleted {
+            rewind_core::db::restore(self.conn, entry_id)?
+        } else {
+            rewind_core::db::soft_delete(self.conn, entry_id)?
+        };
+        if !changed {
+            return Ok(());
+        }
+
+        self.entries = query::fetch(self.conn, &self.filter)?;
+        self.display_entries = self.entries.iter().map(CommandDisplay::new).collect();
+        self.expanded_groups.clear();
+        self.refilter();
+        if !self.rows.is_empty() {
+            self.select_row(Some(selected_row.min(self.rows.len() - 1)));
+        }
+
         Ok(())
     }
 
@@ -344,7 +386,7 @@ impl<'a> App<'a> {
         };
         if self.expanded_groups.insert(*entry_index) {
             self.rows = grouped_rows(&self.entries, &self.visible_entries, &self.expanded_groups);
-            self.list_state.select(Some(row_index));
+            self.select_row(Some(row_index));
         }
     }
 
@@ -371,7 +413,7 @@ impl<'a> App<'a> {
             if let Some(group_row) = self.rows.iter().position(
                 |row| matches!(row, Row::Group { entry_index, .. } if *entry_index == group_index),
             ) {
-                self.list_state.select(Some(group_row));
+                self.select_row(Some(group_row));
             }
         }
     }
@@ -485,6 +527,17 @@ fn handle_editor_key(app: &mut App<'_>, key: KeyEvent) -> bool {
 }
 
 fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
+    if matches!(key.code, KeyCode::Char('d')) && key.modifiers.is_empty() {
+        if app.delete_pending {
+            app.delete_pending = false;
+            app.toggle_deleted_selected()?;
+        } else {
+            app.delete_pending = true;
+        }
+        return Ok(false);
+    }
+    app.delete_pending = false;
+
     match key.code {
         KeyCode::Char('/') if key.modifiers.is_empty() => {
             app.enter_search_mode();
@@ -553,6 +606,10 @@ fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char('f') if key.modifiers.is_empty() => {
             app.toggle_filter(FilterToggle::Fail)?;
+            Ok(false)
+        }
+        KeyCode::Char('x') if key.modifiers.is_empty() => {
+            app.toggle_filter(FilterToggle::Deleted)?;
             Ok(false)
         }
         _ => Ok(false),
@@ -752,7 +809,9 @@ mod tests {
                 git_branch TEXT,
                 exit_code INTEGER,
                 duration_ms INTEGER,
-                started_at TEXT NOT NULL
+                started_at TEXT NOT NULL,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT
             );",
         )
         .unwrap();
@@ -898,5 +957,92 @@ mod tests {
         app.collapse_selected_group();
         assert_eq!(app.rows.len(), 2);
         assert_eq!(app.list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn dd_soft_deletes_selected_entry() {
+        let conn = connection_with_entries();
+        let mut app = app(&conn);
+        let deleted_id = app.selected_entry().unwrap().id;
+
+        for _ in 0..2 {
+            assert!(
+                !handle_list_key(
+                    &mut app,
+                    KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+                )
+                .unwrap()
+            );
+        }
+
+        assert_eq!(app.entries.len(), 1);
+        assert!(db::get(&conn, deleted_id).unwrap().unwrap().deleted);
+    }
+
+    #[test]
+    fn selection_change_cancels_pending_delete() {
+        let conn = connection_with_entries();
+        let mut app = app(&conn);
+
+        handle_list_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        )
+        .unwrap();
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        handle_list_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        )
+        .unwrap();
+
+        assert_eq!(app.entries.len(), 2);
+        assert!(app.delete_pending);
+    }
+
+    #[test]
+    fn selecting_current_row_cancels_pending_delete() {
+        let conn = connection_with_entries();
+        let mut app = app(&conn);
+        app.delete_pending = true;
+
+        app.select_row(app.list_state.selected());
+
+        assert!(!app.delete_pending);
+    }
+
+    #[test]
+    fn dd_restores_entry_in_deleted_view() {
+        let conn = connection_with_entries();
+        let entry_id = query::fetch(&conn, &Filter::new()).unwrap()[0].id;
+        db::soft_delete(&conn, entry_id).unwrap();
+        let mut app = App::new(
+            &conn,
+            FilterContext::default(),
+            Filter::new().only_deleted(),
+            None,
+        )
+        .unwrap();
+
+        for _ in 0..2 {
+            handle_list_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+            )
+            .unwrap();
+        }
+
+        let restored = db::get(&conn, entry_id).unwrap().unwrap();
+        assert!(!restored.deleted);
+        assert!(restored.deleted_at.is_none());
+        assert!(app.entries.is_empty());
     }
 }

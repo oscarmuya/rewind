@@ -35,7 +35,7 @@ pub fn open() -> Result<Connection> {
 }
 
 /// The current schema version.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Applies all schema migrations in order, using schema_version to track
 /// which migrations have already been applied. Each migration is additive
@@ -104,6 +104,16 @@ fn migrate(conn: &Connection) -> Result<()> {
         .context("migration 3 failed")?;
     }
 
+    // Migration 4: add soft-deletion metadata to history entries.
+    if version < 4 {
+        conn.execute_batch(
+            "ALTER TABLE entries ADD COLUMN deleted BOOLEAN NOT NULL DEFAULT FALSE;
+             ALTER TABLE entries ADD COLUMN deleted_at TEXT;
+             CREATE INDEX IF NOT EXISTS idx_entries_deleted ON entries(deleted);",
+        )
+        .context("migration 4 failed")?;
+    }
+
     // Stamp the version after all migrations succeed.
     if version < SCHEMA_VERSION {
         conn.execute(
@@ -119,8 +129,10 @@ fn migrate(conn: &Connection) -> Result<()> {
 /// Inserts a new entry and returns it with its assigned id.
 pub fn insert(conn: &Connection, entry: &Entry) -> Result<Entry> {
     conn.execute(
-        "INSERT INTO entries (command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO entries (
+            command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms,
+            started_at, deleted, deleted_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             entry.command,
             entry.cwd,
@@ -130,6 +142,8 @@ pub fn insert(conn: &Connection, entry: &Entry) -> Result<Entry> {
             entry.exit_code,
             entry.duration_ms,
             entry.started_at.to_rfc3339(),
+            entry.deleted,
+            entry.deleted_at.map(|timestamp| timestamp.to_rfc3339()),
         ],
     )
     .context("insert entry failed")?;
@@ -154,7 +168,7 @@ pub fn complete(conn: &Connection, id: i64, exit_code: i32, duration_ms: i64) ->
 /// Fetches a single entry by id.
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Entry>> {
     conn.query_row(
-        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at, deleted, deleted_at
          FROM entries WHERE id = ?1",
         params![id],
         row_to_entry,
@@ -163,12 +177,43 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Entry>> {
     .context("get entry failed")
 }
 
+/// Marks an entry as deleted while retaining it in history storage.
+pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool> {
+    let changed = conn
+        .execute(
+            "UPDATE entries
+             SET deleted = TRUE, deleted_at = ?1
+             WHERE id = ?2 AND deleted = FALSE",
+            params![Utc::now().to_rfc3339(), id],
+        )
+        .context("soft-delete entry failed")?;
+
+    Ok(changed > 0)
+}
+
+/// Restores a soft-deleted entry to normal history.
+pub fn restore(conn: &Connection, id: i64) -> Result<bool> {
+    let changed = conn
+        .execute(
+            "UPDATE entries
+             SET deleted = FALSE, deleted_at = NULL
+             WHERE id = ?1 AND deleted = TRUE",
+            params![id],
+        )
+        .context("restore entry failed")?;
+
+    Ok(changed > 0)
+}
+
 /// Maps a rusqlite Row to an Entry.
 pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
     let started_at_str: String = row.get(8)?;
     let started_at = started_at_str
         .parse::<DateTime<Utc>>()
         .unwrap_or_else(|_| Utc::now());
+    let deleted_at = row
+        .get::<_, Option<String>>(10)?
+        .and_then(|value| value.parse::<DateTime<Utc>>().ok());
 
     Ok(Entry {
         id: row.get(0)?,
@@ -180,6 +225,8 @@ pub fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
         exit_code: row.get(6)?,
         duration_ms: row.get(7)?,
         started_at,
+        deleted: row.get(9)?,
+        deleted_at,
     })
 }
 
@@ -234,4 +281,34 @@ pub fn row_to_shortcut(row: &rusqlite::Row) -> rusqlite::Result<Shortcut> {
         is_global: row.get(5)?,
         created_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::query::{self, Filter};
+
+    #[test]
+    fn soft_deleted_entries_are_hidden_by_default() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let entry = insert(
+            &conn,
+            &Entry::new("cargo test", "/project", "/project", None, None),
+        )
+        .unwrap();
+
+        assert!(soft_delete(&conn, entry.id).unwrap());
+        assert!(query::fetch(&conn, &Filter::new()).unwrap().is_empty());
+
+        let deleted = query::fetch(&conn, &Filter::new().only_deleted()).unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert!(deleted[0].deleted);
+        assert!(deleted[0].deleted_at.is_some());
+
+        assert!(restore(&conn, entry.id).unwrap());
+        let restored = get(&conn, entry.id).unwrap().unwrap();
+        assert!(!restored.deleted);
+        assert!(restored.deleted_at.is_none());
+    }
 }

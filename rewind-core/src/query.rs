@@ -15,6 +15,8 @@ pub struct Filter {
     pub only_success: bool,
     /// If true, only return entries where exit_code != 0.
     pub only_failure: bool,
+    /// If true, only return soft-deleted entries. Otherwise they are hidden.
+    pub only_deleted: bool,
     pub limit: Option<usize>,
 }
 
@@ -50,6 +52,11 @@ impl Filter {
 
     pub fn only_failure(mut self) -> Self {
         self.only_failure = true;
+        self
+    }
+
+    pub fn only_deleted(mut self) -> Self {
+        self.only_deleted = true;
         self
     }
 
@@ -93,6 +100,12 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
         conditions.push("(exit_code IS NOT NULL AND exit_code != 0)".to_string());
     }
 
+    conditions.push(if filter.only_deleted {
+        "deleted = TRUE".to_string()
+    } else {
+        "deleted = FALSE".to_string()
+    });
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {
@@ -105,7 +118,7 @@ pub fn fetch(conn: &Connection, filter: &Filter) -> Result<Vec<Entry>> {
         .unwrap_or_default();
 
     let sql = format!(
-        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        "SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at, deleted, deleted_at
          FROM entries
          {where_clause}
          ORDER BY started_at DESC
@@ -134,10 +147,11 @@ pub fn search_raw(
 ) -> Result<Vec<Entry>> {
     let pattern = format!("%{term}%");
     let sql = "
-        SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at
+        SELECT id, command, cwd, project_cwd, git_repo, git_branch, exit_code, duration_ms, started_at, deleted, deleted_at
         FROM entries
         WHERE project_cwd = ?1
           AND command LIKE ?2
+          AND deleted = FALSE
         ORDER BY started_at DESC
         LIMIT ?3
     ";

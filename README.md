@@ -200,6 +200,7 @@ rw --cwd
 rw --branch
 rw --ok
 rw --fail
+rw --deleted
 ```
 
 Filters can be combined:
@@ -220,6 +221,7 @@ In the recent-command TUI:
 - press `Alt+Enter` in the editor to insert a newline for multiline commands
 - press `Esc` in the editor to cancel editing and return to the list
 - press `Esc` or `Ctrl-C` in the list to exit without selecting a command
+- press `dd` to soft-delete the selected command; press `x` to show deleted commands and `dd` to restore one
 
 ## Search History
 

@@ -75,6 +75,8 @@ pub fn persist_direct(command: &str, cwd: &str, exit_code: i32, duration_ms: i64
         exit_code: Some(exit_code),
         duration_ms: Some(duration_ms),
         started_at: chrono::Utc::now(),
+        deleted: false,
+        deleted_at: None,
     };
 
     let conn = db::open().context("could not open database")?;
