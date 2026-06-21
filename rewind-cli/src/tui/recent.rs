@@ -1,7 +1,9 @@
-use std::io;
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry as MapEntry},
+    io,
+};
 
 use anyhow::Result;
-use chrono::Local;
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -30,9 +32,10 @@ use crate::tui::{
 };
 
 use super::shared::{
-    CommandDisplay, FilterContext, FilterShortcut, FilterToggle, Junction, command_item,
-    context_bar, date_heading_item, empty_history_item, filter_footer, list_block, search_bar,
-    search_footer, selected_item_style, separator_line, toggle_filter, top_bar,
+    CommandDisplay, FilterContext, FilterShortcut, FilterToggle, Junction, command_group_item,
+    command_item, command_occurrence_item, context_bar, empty_history_item, filter_footer,
+    list_block, search_bar, search_footer, selected_item_style, separator_line, toggle_filter,
+    top_bar,
 };
 
 const TUI_ENTRY_LIMIT: usize = 10_000;
@@ -82,8 +85,18 @@ impl Drop for MouseCaptureGuard {
 
 #[derive(Debug, Clone)]
 enum Row {
-    Header(String),
     Entry(usize),
+    Group {
+        entry_index: usize,
+        count: usize,
+        expanded: bool,
+    },
+    Occurrence(usize),
+}
+
+enum CommandGroup {
+    One(usize),
+    Many(Vec<usize>),
 }
 
 #[derive(Debug)]
@@ -98,6 +111,7 @@ struct App<'a> {
     display_entries: Vec<CommandDisplay>,
     visible_entries: Vec<usize>,
     rows: Vec<Row>,
+    expanded_groups: HashSet<usize>,
     context: FilterContext,
     filter: Filter,
     list_state: ListState,
@@ -117,13 +131,9 @@ impl<'a> App<'a> {
         initial_query: Option<String>,
     ) -> Result<Self> {
         let entries = query::fetch(conn, &filter)?;
-        let today = Local::now().date_naive();
         let search_mode = initial_query.is_some();
 
-        let display_entries = entries
-            .iter()
-            .map(|entry| CommandDisplay::new(entry, today))
-            .collect::<Vec<_>>();
+        let display_entries = entries.iter().map(CommandDisplay::new).collect::<Vec<_>>();
 
         let mut app = Self {
             conn,
@@ -131,6 +141,7 @@ impl<'a> App<'a> {
             display_entries,
             visible_entries: Vec::new(),
             rows: Vec::new(),
+            expanded_groups: HashSet::new(),
             context,
             filter,
             list_state: ListState::default(),
@@ -183,11 +194,7 @@ impl<'a> App<'a> {
                 TUI_ENTRY_LIMIT,
             )
         };
-        self.rows = grouped_rows(
-            &self.display_entries,
-            &self.visible_entries,
-            self.search_query.is_empty(),
-        );
+        self.rows = grouped_rows(&self.entries, &self.visible_entries, &self.expanded_groups);
         self.select_first_entry();
     }
 
@@ -195,9 +202,9 @@ impl<'a> App<'a> {
         self.list_state
             .selected()
             .and_then(|row_index| self.rows.get(row_index))
-            .and_then(|row| match row {
-                Row::Header(_) => None,
-                Row::Entry(entry_index) => Some(*entry_index),
+            .map(|row| match row {
+                Row::Entry(entry_index) | Row::Occurrence(entry_index) => *entry_index,
+                Row::Group { entry_index, .. } => *entry_index,
             })
     }
 
@@ -263,7 +270,7 @@ impl<'a> App<'a> {
         let visible_offset = usize::from(mouse.row - top);
         let row_index = self.list_state.offset().saturating_add(visible_offset);
 
-        if matches!(self.rows.get(row_index), Some(Row::Entry(_))) {
+        if self.rows.get(row_index).is_some() {
             self.list_state.select(Some(row_index));
             return true;
         }
@@ -288,14 +295,10 @@ impl<'a> App<'a> {
         }
 
         let entries = query::fetch(self.conn, &filter)?;
-        let today = Local::now().date_naive();
-
-        self.display_entries = entries
-            .iter()
-            .map(|entry| CommandDisplay::new(entry, today))
-            .collect();
+        self.display_entries = entries.iter().map(CommandDisplay::new).collect();
         self.entries = entries;
         self.filter = filter;
+        self.expanded_groups.clear();
         self.refilter();
         Ok(())
     }
@@ -325,20 +328,52 @@ impl<'a> App<'a> {
     }
 
     fn next_entry_row(&self, start: usize) -> Option<usize> {
-        self.rows
-            .iter()
-            .enumerate()
-            .skip(start)
-            .find_map(|(row_index, row)| matches!(row, Row::Entry(_)).then_some(row_index))
+        (start < self.rows.len()).then_some(start)
     }
 
     fn previous_entry_row(&self, start: usize) -> Option<usize> {
-        self.rows
-            .iter()
-            .enumerate()
-            .take(start.saturating_add(1))
-            .rev()
-            .find_map(|(row_index, row)| matches!(row, Row::Entry(_)).then_some(row_index))
+        (!self.rows.is_empty()).then_some(start.min(self.rows.len() - 1))
+    }
+
+    fn expand_selected_group(&mut self) {
+        let Some(row_index) = self.list_state.selected() else {
+            return;
+        };
+        let Some(Row::Group { entry_index, .. }) = self.rows.get(row_index) else {
+            return;
+        };
+        if self.expanded_groups.insert(*entry_index) {
+            self.rows = grouped_rows(&self.entries, &self.visible_entries, &self.expanded_groups);
+            self.list_state.select(Some(row_index));
+        }
+    }
+
+    fn collapse_selected_group(&mut self) {
+        let Some(row_index) = self.list_state.selected() else {
+            return;
+        };
+        let group_index = match self.rows.get(row_index) {
+            Some(Row::Group { entry_index, .. }) => Some(*entry_index),
+            Some(Row::Occurrence(_)) => self.rows[..row_index].iter().rev().find_map(|row| {
+                if let Row::Group { entry_index, .. } = row {
+                    Some(*entry_index)
+                } else {
+                    None
+                }
+            }),
+            _ => None,
+        };
+        let Some(group_index) = group_index else {
+            return;
+        };
+        if self.expanded_groups.remove(&group_index) {
+            self.rows = grouped_rows(&self.entries, &self.visible_entries, &self.expanded_groups);
+            if let Some(group_row) = self.rows.iter().position(
+                |row| matches!(row, Row::Group { entry_index, .. } if *entry_index == group_index),
+            ) {
+                self.list_state.select(Some(group_row));
+            }
+        }
     }
 }
 
@@ -404,6 +439,8 @@ fn handle_search_key(app: &mut App<'_>, key: KeyEvent) -> bool {
         KeyCode::Enter => app.open_editor_for_selected_entry(),
         KeyCode::Down => app.move_down(),
         KeyCode::Up => app.move_up(),
+        KeyCode::Right => app.expand_selected_group(),
+        KeyCode::Left => app.collapse_selected_group(),
         KeyCode::Backspace => app.pop_search_char(),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.clear_selection();
@@ -470,6 +507,14 @@ fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
             app.move_up();
             Ok(false)
         }
+        KeyCode::Right => {
+            app.expand_selected_group();
+            Ok(false)
+        }
+        KeyCode::Left => {
+            app.collapse_selected_group();
+            Ok(false)
+        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.clear_selection();
             Ok(true)
@@ -480,6 +525,14 @@ fn handle_list_key(app: &mut App<'_>, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char('k') if key.modifiers.is_empty() => {
             app.move_up();
+            Ok(false)
+        }
+        KeyCode::Char('l') if key.modifiers.is_empty() => {
+            app.expand_selected_group();
+            Ok(false)
+        }
+        KeyCode::Char('h') if key.modifiers.is_empty() => {
+            app.collapse_selected_group();
             Ok(false)
         }
         KeyCode::Char('c') if key.modifiers.is_empty() => {
@@ -615,36 +668,69 @@ fn history_items<'a>(
 
     rows.iter()
         .map(|row| match row {
-            Row::Header(heading) => date_heading_item(heading),
             Row::Entry(entry_index) => {
                 command_item(&entries[*entry_index], &display_entries[*entry_index])
+            }
+            Row::Group {
+                entry_index,
+                count,
+                expanded,
+            } => command_group_item(
+                &entries[*entry_index],
+                &display_entries[*entry_index],
+                *count,
+                *expanded,
+            ),
+            Row::Occurrence(entry_index) => {
+                command_occurrence_item(&entries[*entry_index], &display_entries[*entry_index])
             }
         })
         .collect()
 }
 
 fn grouped_rows(
-    display_entries: &[CommandDisplay],
+    entries: &[Entry],
     visible_entries: &[usize],
-    show_dates: bool,
+    expanded_groups: &HashSet<usize>,
 ) -> Vec<Row> {
-    let mut rows = Vec::with_capacity(visible_entries.len().saturating_mul(2));
-    let mut last_heading = None;
-
+    let mut groups: HashMap<&str, CommandGroup> = HashMap::with_capacity(visible_entries.len());
     for &index in visible_entries {
-        let display = &display_entries[index];
-        let heading = display.heading.as_str();
-
-        if last_heading != Some(heading) {
-            if show_dates {
-                rows.push(Row::Header(display.heading.clone()));
+        let command = entries[index].command.as_str();
+        match groups.entry(command) {
+            MapEntry::Vacant(entry) => {
+                entry.insert(CommandGroup::One(index));
             }
-            last_heading = Some(heading);
+            MapEntry::Occupied(mut entry) => match entry.get_mut() {
+                CommandGroup::One(first) => {
+                    let first = *first;
+                    entry.insert(CommandGroup::Many(vec![first, index]));
+                }
+                CommandGroup::Many(occurrences) => occurrences.push(index),
+            },
         }
-
-        rows.push(Row::Entry(index));
     }
 
+    let mut rows = Vec::with_capacity(visible_entries.len());
+    for &index in visible_entries {
+        let command = entries[index].command.as_str();
+        if let Some(group) = groups.remove(command) {
+            match group {
+                CommandGroup::One(representative) => rows.push(Row::Entry(representative)),
+                CommandGroup::Many(occurrences) => {
+                    let representative = occurrences[0];
+                    let expanded = expanded_groups.contains(&representative);
+                    rows.push(Row::Group {
+                        entry_index: representative,
+                        count: occurrences.len(),
+                        expanded,
+                    });
+                    if expanded {
+                        rows.extend(occurrences.iter().copied().map(Row::Occurrence));
+                    }
+                }
+            }
+        }
+    }
     rows
 }
 
@@ -765,5 +851,52 @@ mod tests {
         ));
         assert!(app.is_editing());
         assert!(app.command_to_run.is_none());
+    }
+
+    #[test]
+    fn repeated_commands_collapse_in_newest_first_order() {
+        let conn = connection_with_entries();
+        db::insert(
+            &conn,
+            &Entry::new("git status", "/other", "/project", None, None),
+        )
+        .unwrap();
+        let app = app(&conn);
+
+        assert_eq!(app.rows.len(), 2);
+        assert!(matches!(
+            app.rows[0],
+            Row::Group {
+                count: 2,
+                expanded: false,
+                ..
+            }
+        ));
+        let Row::Entry(entry_index) = app.rows[1] else {
+            panic!("expected the unique command to remain a normal row");
+        };
+        assert_eq!(app.entries[entry_index].command, "cargo test");
+    }
+
+    #[test]
+    fn expanding_group_exposes_exact_occurrences_and_left_collapses() {
+        let conn = connection_with_entries();
+        db::insert(
+            &conn,
+            &Entry::new("git status", "/other", "/project", None, None),
+        )
+        .unwrap();
+        let mut app = app(&conn);
+
+        app.expand_selected_group();
+        assert_eq!(app.rows.len(), 4);
+        assert!(matches!(app.rows[1], Row::Occurrence(_)));
+        assert!(matches!(app.rows[2], Row::Occurrence(_)));
+
+        app.list_state.select(Some(2));
+        assert_eq!(app.selected_entry().unwrap().cwd, "/project");
+        app.collapse_selected_group();
+        assert_eq!(app.rows.len(), 2);
+        assert_eq!(app.list_state.selected(), Some(0));
     }
 }
