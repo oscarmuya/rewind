@@ -72,6 +72,7 @@ pub enum FilterToggle {
     Branch,
     Ok,
     Fail,
+    Deleted,
 }
 
 pub fn toggle_filter(filter: &mut Filter, toggle: FilterToggle, context: &FilterContext) {
@@ -103,6 +104,9 @@ pub fn toggle_filter(filter: &mut Filter, toggle: FilterToggle, context: &Filter
             if filter.only_failure {
                 filter.only_success = false;
             }
+        }
+        FilterToggle::Deleted => {
+            filter.only_deleted = !filter.only_deleted;
         }
     }
 }
@@ -334,6 +338,17 @@ pub fn filter_footer(
         spans.push(filter_label(shortcut, filter, context));
     }
 
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("[dd] ", Style::default().fg(THEME.subtle)));
+    spans.push(Span::styled(
+        if filter.only_deleted {
+            "restore"
+        } else {
+            "delete"
+        },
+        Style::default().fg(THEME.muted),
+    ));
+
     Paragraph::new(vec![
         h_line(width, "┼"),
         Line::from(spans),
@@ -531,12 +546,13 @@ fn filter_label(
         FilterToggle::Branch => filter.git_branch.is_some(),
         FilterToggle::Ok => filter.only_success,
         FilterToggle::Fail => filter.only_failure,
+        FilterToggle::Deleted => filter.only_deleted,
     };
 
     let is_available = match shortcut.toggle {
         FilterToggle::Repo => context.git_repo.is_some(),
         FilterToggle::Branch => context.git_branch.is_some(),
-        FilterToggle::Cwd | FilterToggle::Ok | FilterToggle::Fail => true,
+        FilterToggle::Cwd | FilterToggle::Ok | FilterToggle::Fail | FilterToggle::Deleted => true,
     };
 
     let style = if is_active {

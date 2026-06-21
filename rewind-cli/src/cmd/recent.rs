@@ -42,6 +42,10 @@ pub struct Args {
     #[arg(long)]
     pub fail: bool,
 
+    /// Only show soft-deleted commands.
+    #[arg(long)]
+    pub deleted: bool,
+
     /// Print matches to stdout instead of opening the TUI.
     #[arg(long)]
     pub plain: bool,
@@ -83,6 +87,10 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
 
     if args.fail {
         filter = filter.only_failure();
+    }
+
+    if args.deleted {
+        filter = filter.only_deleted();
     }
 
     let conn = db::open()?;
