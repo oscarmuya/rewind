@@ -52,7 +52,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
             let filter = Filter::new().project_cwd(&project_root_str).limit(10_000);
 
             if let Some(entry) =
-                crate::tui::run_recent(&conn, context, filter, Some(term.unwrap_or_default()))?
+                crate::tui::run_history(&conn, context, filter, Some(term.unwrap_or_default()))?
             {
                 return rerun_entry(&entry);
             }
