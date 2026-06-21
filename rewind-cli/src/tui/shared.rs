@@ -24,7 +24,6 @@ pub enum Junction {
 }
 
 pub struct CommandDisplay {
-    pub heading: String,
     time: String,
     status: &'static str,
     status_color: Color,
@@ -32,12 +31,11 @@ pub struct CommandDisplay {
 }
 
 impl CommandDisplay {
-    pub fn new(entry: &Entry, today: NaiveDate) -> Self {
+    pub fn new(entry: &Entry) -> Self {
         let local = entry.started_at.with_timezone(&Local);
         let (status, status_color) = status_parts(entry);
 
         Self {
-            heading: date_heading_from_local(&local, today),
             time: local.format("%H:%M").to_string(),
             status,
             status_color,
@@ -139,28 +137,42 @@ pub fn empty_history_item() -> ListItem<'static> {
     ))
 }
 
-pub fn date_heading_item(heading: &str) -> ListItem<'static> {
-    ListItem::new(gutter_line(
-        "",
-        vec![Span::styled(
-            heading.to_owned(),
-            Style::default()
-                .fg(THEME.heading)
-                .add_modifier(Modifier::BOLD),
-        )],
-    ))
+pub fn command_item<'a>(entry: &'a Entry, display: &'a CommandDisplay) -> ListItem<'a> {
+    command_item_with_prefix(entry, display, "", None)
 }
 
-pub fn command_item<'a>(entry: &'a Entry, display: &'a CommandDisplay) -> ListItem<'a> {
-    ListItem::new(gutter_line(
-        &display.time,
-        vec![
-            Span::styled(display.status, Style::default().fg(display.status_color)),
-            Span::styled(display.branch.as_str(), Style::default().fg(THEME.branch)),
-            Span::raw("  "),
-            Span::styled(entry.command.as_str(), Style::default().fg(THEME.text)),
-        ],
-    ))
+pub fn command_group_item<'a>(
+    entry: &'a Entry,
+    display: &'a CommandDisplay,
+    count: usize,
+    expanded: bool,
+) -> ListItem<'a> {
+    let marker = if expanded { "⌄ " } else { "› " };
+    command_item_with_prefix(entry, display, marker, Some(format!("  {count} runs")))
+}
+
+pub fn command_occurrence_item<'a>(entry: &'a Entry, display: &'a CommandDisplay) -> ListItem<'a> {
+    command_item_with_prefix(entry, display, "  └ ", None)
+}
+
+fn command_item_with_prefix<'a>(
+    entry: &'a Entry,
+    display: &'a CommandDisplay,
+    prefix: &'static str,
+    suffix: Option<String>,
+) -> ListItem<'a> {
+    let mut spans = vec![
+        Span::styled(display.status, Style::default().fg(display.status_color)),
+        Span::styled(display.branch.as_str(), Style::default().fg(THEME.branch)),
+        Span::raw("  "),
+        Span::raw(prefix),
+        Span::styled(entry.command.as_str(), Style::default().fg(THEME.text)),
+    ];
+    if let Some(suffix) = suffix {
+        spans.push(Span::styled(suffix, Style::default().fg(THEME.subtle)));
+    }
+
+    ListItem::new(gutter_line(&display.time, spans))
 }
 
 pub fn context_bar(entry: Option<&Entry>) -> Line<'static> {
