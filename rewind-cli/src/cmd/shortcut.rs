@@ -33,7 +33,7 @@ pub enum ShortcutCommand {
         #[arg(num_args(1..), trailing_var_arg = true)]
         command: Vec<String>,
         /// Save this shortcut globally instead of scoping it to the current project.
-        #[arg(long)]
+        #[arg(short, long)]
         global: bool,
     },
     /// Remove a shortcut by alias from the current project (or globally with --global).
@@ -41,13 +41,13 @@ pub enum ShortcutCommand {
         /// The alias to remove.
         alias: String,
         /// Remove from global shortcuts instead of the current project.
-        #[arg(long)]
+        #[arg(short, long)]
         global: bool,
     },
     /// List shortcuts for the current project, including globals.
     List {
         /// List only global shortcuts.
-        #[arg(long)]
+        #[arg(short, long)]
         global: bool,
     },
 }

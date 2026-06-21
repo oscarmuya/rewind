@@ -15,11 +15,11 @@ pub struct Args {
     pub shell: Option<Shell>,
 
     /// Install the integration into the shell startup file.
-    #[arg(long, conflicts_with = "uninstall")]
+    #[arg(short, long, conflicts_with = "uninstall")]
     pub install: bool,
 
     /// Remove the integration from the shell startup file.
-    #[arg(long, conflicts_with = "install")]
+    #[arg(short, long, conflicts_with = "install")]
     pub uninstall: bool,
 }
 

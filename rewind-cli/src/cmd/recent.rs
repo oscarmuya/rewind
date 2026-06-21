@@ -23,31 +23,31 @@ pub struct Args {
     pub limit: usize,
 
     /// Filter by current working directory
-    #[arg(long)]
+    #[arg(short, long)]
     pub cwd: bool,
 
     /// Filter by git repository (uses current repo if inside one).
-    #[arg(long)]
+    #[arg(short, long)]
     pub repo: bool,
 
     /// Filter by current git branch.
-    #[arg(long)]
+    #[arg(short, long)]
     pub branch: bool,
 
     /// Only show successful commands (exit code 0).
-    #[arg(long)]
+    #[arg(short, long)]
     pub ok: bool,
 
     /// Only show failed commands (non-zero exit).
-    #[arg(long)]
+    #[arg(short, long)]
     pub fail: bool,
 
     /// Only show soft-deleted commands.
-    #[arg(long)]
+    #[arg(short, long)]
     pub deleted: bool,
 
     /// Print matches to stdout instead of opening the TUI.
-    #[arg(long)]
+    #[arg(short, long)]
     pub plain: bool,
 
     /// Replay the Nth most recent matching command.

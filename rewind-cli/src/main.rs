@@ -146,12 +146,31 @@ fn normalize_recent_selector(args: impl IntoIterator<Item = OsString>) -> Vec<Os
             "--cwd" | "--repo" | "--branch" | "--ok" | "--fail" | "--deleted" | "--plain" => {
                 index += 1
             }
-            _ if arg.starts_with("--limit=") || arg.starts_with("-l") => index += 1,
+            _ if arg.starts_with("--limit=") => index += 1,
+            _ if let Some(consumed) = short_recent_option_span(arg) => index += consumed,
             _ => break,
         }
     }
 
     args
+}
+
+fn short_recent_option_span(arg: &str) -> Option<usize> {
+    if !arg.starts_with('-') || arg.starts_with("--") {
+        return None;
+    }
+
+    let mut flags = arg[1..].chars().peekable();
+    flags.peek()?;
+    while let Some(flag) = flags.next() {
+        match flag {
+            'c' | 'r' | 'b' | 'o' | 'f' | 'd' | 'p' => {}
+            'l' => return Some(if flags.peek().is_some() { 1 } else { 2 }),
+            _ => return None,
+        }
+    }
+
+    Some(1)
 }
 
 #[cfg(test)]
@@ -185,6 +204,16 @@ mod tests {
         assert_eq!(
             normalize_recent_selector(args),
             ["rw", "recent", "--limit", "20", "--index", "2"].map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn normalizes_recent_selector_after_grouped_short_flags() {
+        let args = ["rw", "recent", "-of", "-3"].map(OsString::from);
+
+        assert_eq!(
+            normalize_recent_selector(args),
+            ["rw", "recent", "-of", "--index", "3"].map(OsString::from)
         );
     }
 

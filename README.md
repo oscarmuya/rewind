@@ -221,6 +221,10 @@ rw --repo --branch --fail --limit 10
 
 `rw recent` is still accepted as a compatibility alias for the same behavior.
 
+Options support `-l` (limit), `-p` (plain), `-c` (cwd), `-r` (repo), `-b`
+(branch), `-o` (ok), `-f` (fail), and `-d` (deleted). Init supports `-i`
+(install) and `-u` (uninstall); shortcut commands support `-g` (global).
+
 In the recent-command TUI:
 
 - use `Up`/`Down` or `k`/`j` to move

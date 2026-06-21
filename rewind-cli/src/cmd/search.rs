@@ -18,7 +18,7 @@ pub struct Args {
     pub term: Option<String>,
 
     /// Print matches to stdout instead of opening the TUI.
-    #[arg(long)]
+    #[arg(short, long)]
     pub plain: bool,
 
     /// Maximum results (plain mode only).
