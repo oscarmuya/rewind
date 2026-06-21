@@ -7,7 +7,7 @@ mod cmd;
 mod tui;
 
 pub const RESERVED: &[&str] = &[
-    "run", "search", "status", "shortcut", "recent", "daemon", "init", "help",
+    "run", "search", "status", "shortcut", "daemon", "init", "help",
 ];
 
 #[derive(Debug, Parser)]
@@ -24,14 +24,14 @@ struct Cli {
     command: Option<Commands>,
 
     #[command(flatten)]
-    recent: cmd::recent::Args,
+    history: cmd::history::Args,
 }
 
 impl Cli {
     fn execute(self) -> Result<ExitCode> {
         match self.command {
             Some(command) => command.execute(),
-            Option::None => cmd::recent::execute(self.recent),
+            Option::None => cmd::history::execute(self.history),
         }
     }
 }
@@ -44,9 +44,6 @@ enum Commands {
 
     /// Search history interactively or print matches to stdout.
     Search(cmd::search::Args),
-
-    /// Show recent history or replay from the TUI.
-    Recent(cmd::recent::Args),
 
     /// Print the shell integration snippet for the given shell.
     Init(cmd::init::Args),
@@ -71,8 +68,6 @@ impl Commands {
             Self::Run(args) => cmd::run::execute(args),
 
             Self::Search(args) => cmd::search::execute(args),
-
-            Self::Recent(args) => cmd::recent::execute(args),
 
             Self::Init(args) => {
                 cmd::init::execute(args)?;
@@ -103,7 +98,7 @@ impl Commands {
 }
 
 fn main() -> ExitCode {
-    match Cli::parse_from(normalize_recent_selector(std::env::args_os())).execute() {
+    match Cli::parse_from(normalize_history_selector(std::env::args_os())).execute() {
         Ok(code) => code,
         Err(error) => {
             eprintln!("{error:#}");
@@ -112,32 +107,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn normalize_recent_selector(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+fn normalize_history_selector(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
     let mut args: Vec<_> = args.into_iter().collect();
     let mut index = 1;
-    let mut explicit_recent = false;
 
     while let Some(arg) = args.get(index).and_then(|arg| arg.to_str()) {
-        if arg == "recent" && !explicit_recent {
-            explicit_recent = true;
-            index += 1;
-            continue;
-        }
-
         if let Some(value) = arg
             .strip_prefix('-')
             .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
             .map(str::to_owned)
         {
-            let mut replacement = vec![OsString::from("recent")];
-            replacement.extend(
-                args[1..index]
-                    .iter()
-                    .filter(|arg| arg.as_os_str() != "recent")
-                    .cloned(),
-            );
-            replacement.extend([OsString::from("--index"), value.into()]);
-            args.splice(1..=index, replacement);
+            args.splice(index..=index, [OsString::from("--index"), value.into()]);
             break;
         }
 
@@ -147,7 +127,7 @@ fn normalize_recent_selector(args: impl IntoIterator<Item = OsString>) -> Vec<Os
                 index += 1
             }
             _ if arg.starts_with("--limit=") => index += 1,
-            _ if let Some(consumed) = short_recent_option_span(arg) => index += consumed,
+            _ if let Some(consumed) = short_history_option_span(arg) => index += consumed,
             _ => break,
         }
     }
@@ -155,7 +135,7 @@ fn normalize_recent_selector(args: impl IntoIterator<Item = OsString>) -> Vec<Os
     args
 }
 
-fn short_recent_option_span(arg: &str) -> Option<usize> {
+fn short_history_option_span(arg: &str) -> Option<usize> {
     if !arg.starts_with('-') || arg.starts_with("--") {
         return None;
     }
@@ -175,45 +155,32 @@ fn short_recent_option_span(arg: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, normalize_recent_selector};
+    use super::{Cli, normalize_history_selector};
     use clap::Parser;
     use std::ffi::OsString;
 
     #[test]
-    fn normalizes_recent_selector_with_filters() {
+    fn normalizes_history_selector_with_filters() {
         let args = ["rw", "--repo", "-2", "--plain", "--ok"].map(OsString::from);
-        let normalized = normalize_recent_selector(args);
+        let normalized = normalize_history_selector(args);
 
         assert_eq!(
             normalized,
-            ["rw", "recent", "--repo", "--index", "2", "--plain", "--ok"].map(OsString::from)
+            ["rw", "--repo", "--index", "2", "--plain", "--ok"].map(OsString::from)
         );
 
         let cli = Cli::try_parse_from(normalized).unwrap();
-        let Some(Commands::Recent(args)) = cli.command else {
-            panic!("expected recent command");
-        };
-        assert_eq!(args.index, Some(2));
-        assert!(args.repo && args.plain && args.ok);
+        assert_eq!(cli.history.index, Some(2));
+        assert!(cli.history.repo && cli.history.plain && cli.history.ok);
     }
 
     #[test]
-    fn normalizes_selector_for_recent_subcommand() {
-        let args = ["rw", "recent", "--limit", "20", "-2"].map(OsString::from);
+    fn normalizes_history_selector_after_grouped_short_flags() {
+        let args = ["rw", "-of", "-3"].map(OsString::from);
 
         assert_eq!(
-            normalize_recent_selector(args),
-            ["rw", "recent", "--limit", "20", "--index", "2"].map(OsString::from)
-        );
-    }
-
-    #[test]
-    fn normalizes_recent_selector_after_grouped_short_flags() {
-        let args = ["rw", "recent", "-of", "-3"].map(OsString::from);
-
-        assert_eq!(
-            normalize_recent_selector(args),
-            ["rw", "recent", "-of", "--index", "3"].map(OsString::from)
+            normalize_history_selector(args),
+            ["rw", "-of", "--index", "3"].map(OsString::from)
         );
     }
 
@@ -221,6 +188,6 @@ mod tests {
     fn leaves_command_arguments_unchanged() {
         let args = ["rw", "run", "echo", "-2"].map(OsString::from);
 
-        assert_eq!(normalize_recent_selector(args.clone()), args);
+        assert_eq!(normalize_history_selector(args.clone()), args);
     }
 }

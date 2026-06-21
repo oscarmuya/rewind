@@ -101,12 +101,12 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
 
     if let Some(index) = args.index {
         if index == 0 {
-            bail!("recent command index must be 1 or greater");
+            bail!("command index must be 1 or greater");
         }
 
         let entries = query::fetch(&conn, &filter)?;
         let Some(entry) = entries.get(index - 1) else {
-            bail!("recent command -{index} was not found");
+            bail!("command -{index} was not found");
         };
 
         if args.plain {
@@ -120,7 +120,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     }
 
     if !args.plain {
-        if let Some(entry) = crate::tui::run_recent(&conn, context, filter, None)? {
+        if let Some(entry) = crate::tui::run_history(&conn, context, filter, None)? {
             return rerun_entry(&entry);
         }
 
