@@ -110,9 +110,15 @@ struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    fn new(conn: &'a Connection, context: FilterContext, filter: Filter) -> Result<Self> {
+    fn new(
+        conn: &'a Connection,
+        context: FilterContext,
+        filter: Filter,
+        initial_query: Option<String>,
+    ) -> Result<Self> {
         let entries = query::fetch(conn, &filter)?;
         let today = Local::now().date_naive();
+        let search_mode = initial_query.is_some();
 
         let display_entries = entries
             .iter()
@@ -131,12 +137,12 @@ impl<'a> App<'a> {
             list_area: Rect::default(),
             command_to_run: None,
             edit_input: None,
-            search_mode: false,
-            search_query: String::new(),
+            search_mode,
+            search_query: initial_query.unwrap_or_default(),
             matcher: Matcher::new(Config::DEFAULT),
         };
 
-        app.rebuild_rows();
+        app.refilter();
         Ok(app)
     }
 
@@ -273,10 +279,6 @@ impl<'a> App<'a> {
         self.edit_input = Some(editor_for_command(&entry.command));
     }
 
-    fn rebuild_rows(&mut self) {
-        self.refilter();
-    }
-
     fn toggle_filter(&mut self, toggle: FilterToggle) -> Result<()> {
         let mut filter = self.filter.clone();
         toggle_filter(&mut filter, toggle, &self.context);
@@ -294,7 +296,7 @@ impl<'a> App<'a> {
             .collect();
         self.entries = entries;
         self.filter = filter;
-        self.rebuild_rows();
+        self.refilter();
         Ok(())
     }
 
@@ -340,9 +342,14 @@ impl<'a> App<'a> {
     }
 }
 
-pub fn run(conn: &Connection, context: FilterContext, filter: Filter) -> Result<Option<Entry>> {
+pub fn run(
+    conn: &Connection,
+    context: FilterContext,
+    filter: Filter,
+    initial_query: Option<String>,
+) -> Result<Option<Entry>> {
     let _mouse = MouseCaptureGuard::enable()?;
-    let mut app = App::new(conn, context, filter)?;
+    let mut app = App::new(conn, context, filter, initial_query)?;
     init_theme();
 
     ratatui::run(|terminal| event_loop(terminal, &mut app))?;
@@ -678,7 +685,40 @@ mod tests {
     }
 
     fn app(conn: &Connection) -> App<'_> {
-        App::new(conn, FilterContext::default(), Filter::new().limit(500)).unwrap()
+        App::new(
+            conn,
+            FilterContext::default(),
+            Filter::new().limit(500),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn initial_query_starts_in_search_mode() {
+        let conn = connection_with_entries();
+        let app = App::new(
+            &conn,
+            FilterContext::default(),
+            Filter::new().limit(500),
+            Some(String::new()),
+        )
+        .unwrap();
+
+        assert!(app.search_mode);
+        assert!(app.search_query.is_empty());
+
+        let app = App::new(
+            &conn,
+            FilterContext::default(),
+            Filter::new().limit(500),
+            Some("cargo".to_string()),
+        )
+        .unwrap();
+
+        assert!(app.search_mode);
+        assert_eq!(app.search_query, "cargo");
+        assert_eq!(app.visible_entries.len(), 1);
     }
 
     #[test]

@@ -223,7 +223,7 @@ In the recent-command TUI:
 
 ## Search History
 
-Open the interactive TUI:
+Open the recent-command TUI in search mode:
 
 ```sh
 rw search
@@ -242,15 +242,8 @@ rw search cargo --plain
 rw search cargo --plain --limit 20
 ```
 
-In the TUI:
-
-- type to filter commands
-- use `Up`/`Down` or `k`/`j` to move
-- press `Enter` to open the selected command in the replay editor
-- edit the command, then press `Enter` to run it
-- press `Alt+Enter` in the editor to insert a newline for multiline commands
-- press `Esc` in the editor to cancel editing and return to search
-- press `Esc` or `Ctrl-C` in search to exit without selecting
+Interactive search uses the same TUI and shortcuts documented under
+[Replay Recent Commands](#replay-recent-commands).
 
 ## Shortcuts
 
