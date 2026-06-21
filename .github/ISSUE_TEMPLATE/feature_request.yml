@@ -1,0 +1,58 @@
+name: Feature Request
+description: Propose a new feature or improvement for rewind.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea that would make `rewind` more useful? Describe it below.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this feature solve, or what use case does it enable?
+      placeholder: "I often want to filter history by exit code across multiple projects, but currently..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you would like to see. Include example commands or output if applicable.
+      placeholder: |
+        Add a `--global` flag to `rw recent` that aggregates history across all projects:
+          rw recent --global --fail
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative approaches or workarounds you have tried or thought about.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of rewind does this affect?
+      options:
+        - CLI (rw commands / flags)
+        - TUI (interactive picker / search)
+        - Shell integration (bash / zsh / fish hooks)
+        - Daemon (rw-daemon)
+        - Storage / database
+        - Shortcuts
+        - Install / setup
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, mockups, or references that help illustrate the request.

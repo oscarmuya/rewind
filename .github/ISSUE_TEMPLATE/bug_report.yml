@@ -1,0 +1,92 @@
+name: Bug Report
+description: Report something that is not working correctly in rewind.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the sections below as completely as you can.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: When I run `rw search`, it ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Run `rw init --install`
+        2. Open a new shell
+        3. Run `rw search foo`
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include any error output or logs.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: rewind_version
+    attributes:
+      label: rewind Version
+      description: Output of `rw --version`
+      placeholder: "e.g. rw 0.6.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      description: Which shell are you using?
+      options:
+        - bash
+        - zsh
+        - fish
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / Distribution
+      description: Your operating system and version.
+      placeholder: "e.g. Arch Linux (kernel 6.9.3), macOS 14.5"
+    validations:
+      required: true
+
+  - type: textarea
+    id: rw_status
+    attributes:
+      label: rw status Output
+      description: Paste the output of `rw status` here, if relevant.
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or details that might help.
