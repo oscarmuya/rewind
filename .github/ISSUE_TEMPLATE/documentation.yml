@@ -1,0 +1,51 @@
+name: Documentation
+description: Report missing, incorrect, or unclear documentation.
+title: "docs: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us keep the docs accurate and easy to follow.
+
+  - type: dropdown
+    id: doc_area
+    attributes:
+      label: Documentation Area
+      description: Where is the documentation issue?
+      options:
+        - README
+        - CLI help text (`rw --help` / subcommand help)
+        - Code comments / inline docs
+        - CHANGELOG
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What is Wrong or Missing?
+      description: Describe the issue with the current documentation. Quote the relevant section if possible.
+      placeholder: "The README does not mention that `python3` and `socat` are required for shell integrations on the install section..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: How should the documentation be corrected or extended?
+
+  - type: input
+    id: location
+    attributes:
+      label: Link or File Path
+      description: Direct link or path to the relevant documentation.
+      placeholder: "https://github.com/oscarmuya/rewind/blob/main/README.md#install or rewind-cli/src/main.rs:42"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Anything else that would help clarify the issue.
