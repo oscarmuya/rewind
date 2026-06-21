@@ -88,7 +88,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let conn = db::open()?;
 
     if !args.plain {
-        if let Some(entry) = crate::tui::run_recent(&conn, context, filter)? {
+        if let Some(entry) = crate::tui::run_recent(&conn, context, filter, None)? {
             return rerun_entry(&entry);
         }
 

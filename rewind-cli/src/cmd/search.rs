@@ -5,7 +5,8 @@ use clap::Args as ClapArgs;
 use rewind_core::{
     db,
     functions::{find_project_root, get_cwd, resolve_git},
-    fuzzy, query,
+    fuzzy,
+    query::{self, Filter},
 };
 
 use crate::cmd::functions::rerun_entry;
@@ -45,12 +46,14 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
 
         // Interactive TUI -- term is the pre-populated query or empty.
         (term, false) => {
-            let initial = term.unwrap_or_default();
             let cwd_str = cwd.to_string_lossy().into_owned();
             let (git_repo, git_branch) = resolve_git(&cwd_str);
             let context = FilterContext::new(cwd_str, git_repo, git_branch);
+            let filter = Filter::new().project_cwd(&project_root_str).limit(10_000);
 
-            if let Some(entry) = crate::tui::run(&conn, &project_root_str, &initial, context)? {
+            if let Some(entry) =
+                crate::tui::run_recent(&conn, context, filter, Some(term.unwrap_or_default()))?
+            {
                 return rerun_entry(&entry);
             }
         }
