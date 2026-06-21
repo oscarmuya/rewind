@@ -245,7 +245,7 @@ pub fn search_bar(query: &str, result_count: usize, width: u16) -> Vec<Line<'sta
     vec![h_line(width, "┬"), input, h_line(width, "┴")]
 }
 
-pub fn top_bar(width: u16) -> Vec<Line<'static>> {
+pub fn top_bar(width: u16, subtitle: &str) -> Vec<Line<'static>> {
     let input = Line::from(vec![
         gutter_label(""),
         border_span("│"),
@@ -256,10 +256,7 @@ pub fn top_bar(width: u16) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("· ", Style::default().fg(THEME.subtle)),
-        Span::styled(
-            "per-project command history for your shell",
-            Style::default().fg(THEME.subtle),
-        ),
+        Span::styled(subtitle.to_owned(), Style::default().fg(THEME.subtle)),
     ]);
 
     vec![h_line(width, "┬"), input, h_line(width, "┴")]
@@ -288,7 +285,7 @@ pub fn editor_block() -> Block<'static> {
     })
 }
 
-pub fn editor_footer(width: u16) -> Paragraph<'static> {
+pub fn editor_footer(width: u16, action: &str) -> Paragraph<'static> {
     let input = Line::from(vec![
         gutter_label(""),
         border_span("│"),
@@ -300,7 +297,7 @@ pub fn editor_footer(width: u16) -> Paragraph<'static> {
         ),
         Span::styled("· ", Style::default().fg(THEME.subtle)),
         Span::styled(
-            "[Enter] run  [Alt+Enter] newline  [Esc] cancel ",
+            format!("[Enter] {action}  [Alt+Enter] newline  [Esc] cancel "),
             Style::default().fg(THEME.subtle),
         ),
     ]);
@@ -371,7 +368,7 @@ pub fn search_footer(width: u16) -> Paragraph<'static> {
     Paragraph::new(vec![h_line(width, "┼"), input, h_line(width, "┴")])
 }
 
-pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>) {
+pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>, action: &str) {
     let screen_area = frame.area();
 
     let dim_block = Block::default().style(
@@ -392,7 +389,41 @@ pub fn render_editor_modal(frame: &mut Frame, textarea: &mut TextArea<'static>) 
     textarea.set_block(editor_block());
 
     frame.render_widget(&*textarea, editor_area);
-    frame.render_widget(editor_footer(footer_area.width), footer_area);
+    frame.render_widget(editor_footer(footer_area.width, action), footer_area);
+}
+
+pub fn action_footer(width: u16, title: &str, actions: &[(&str, &str)]) -> Paragraph<'static> {
+    let mut spans = vec![
+        gutter_label(""),
+        border_span("│"),
+        Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(THEME.heading)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("· ", Style::default().fg(THEME.subtle)),
+    ];
+
+    for (index, (key, label)) in actions.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(
+            format!("[{key}] "),
+            Style::default().fg(THEME.subtle),
+        ));
+        spans.push(Span::styled(
+            (*label).to_owned(),
+            Style::default().fg(THEME.muted),
+        ));
+    }
+
+    Paragraph::new(vec![
+        h_line(width, "┼"),
+        Line::from(spans),
+        h_line(width, "┴"),
+    ])
 }
 
 pub fn centered_modal(percent_x: u16, height: u16, area: Rect) -> Rect {
@@ -513,12 +544,9 @@ fn h_line(width: u16, junction: &'static str) -> Line<'static> {
     ])
 }
 
-fn gutter_line<'a>(label: impl AsRef<str>, mut content: Vec<Span<'a>>) -> Line<'a> {
-    let mut spans = vec![
-        gutter_label(label.as_ref()),
-        border_span("│"),
-        Span::raw(" "),
-    ];
+pub(crate) fn gutter_line<'a>(label: impl AsRef<str>, content: Vec<Span<'a>>) -> Line<'a> {
+    let mut content = content;
+    let mut spans = vec![gutter_label(label), border_span("│"), Span::raw(" ")];
 
     spans.append(&mut content);
     Line::from(spans)

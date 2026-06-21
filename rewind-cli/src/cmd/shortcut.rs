@@ -20,7 +20,7 @@ use crate::{
 #[derive(ClapArgs, Debug)]
 pub struct Args {
     #[command(subcommand)]
-    pub command: ShortcutCommand,
+    pub command: Option<ShortcutCommand>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -44,6 +44,17 @@ pub enum ShortcutCommand {
         #[arg(short, long)]
         global: bool,
     },
+    /// Change the command saved for an existing shortcut.
+    Edit {
+        /// The alias to edit.
+        alias: String,
+        /// The replacement command.
+        #[arg(num_args(1..), trailing_var_arg = true)]
+        command: Vec<String>,
+        /// Edit a global shortcut instead of one scoped to the current project.
+        #[arg(short, long)]
+        global: bool,
+    },
     /// List shortcuts for the current project, including globals.
     List {
         /// List only global shortcuts.
@@ -59,11 +70,12 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let project_root_str = project_root.to_string_lossy().into_owned();
 
     match args.command {
-        ShortcutCommand::Add {
+        None => crate::tui::run_shortcuts(&conn, &project_root_str)?,
+        Some(ShortcutCommand::Add {
             alias,
             command,
             global,
-        } => {
+        }) => {
             if RESERVED.contains(&alias.as_str()) {
                 bail!(
                     "'{alias}' is a reserved subcommand name and cannot be used as a shortcut alias"
@@ -93,7 +105,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
             println!("Saved shortcut '{alias}' {scope}.");
         }
 
-        ShortcutCommand::Remove { alias, global } => {
+        Some(ShortcutCommand::Remove { alias, global }) => {
             let project_dir = if global {
                 String::from("__global__")
             } else {
@@ -116,7 +128,32 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
             }
         }
 
-        ShortcutCommand::List { global } => {
+        Some(ShortcutCommand::Edit {
+            alias,
+            command,
+            global,
+        }) => {
+            if command.is_empty() || command.iter().all(|arg| arg.trim().is_empty()) {
+                bail!("A command is required. Usage: rw shortcut edit <alias> <command>");
+            }
+            let project_dir = if global {
+                String::from("__global__")
+            } else {
+                project_root_str.clone()
+            };
+            let Some(shortcut) = query_shortcuts::resolve(&conn, &alias, &project_dir, global)?
+            else {
+                bail!(
+                    "No shortcut found for alias '{alias}'. \
+                     use `--global` if it is a global shortcut"
+                );
+            };
+            let command = parse_cmd_args(&command);
+            query_shortcuts::update_command(&conn, shortcut.id, &command)?;
+            println!("Updated shortcut '{alias}'.");
+        }
+
+        Some(ShortcutCommand::List { global }) => {
             let shortcuts = if global {
                 query_shortcuts::globals(&conn)?
             } else {
@@ -176,6 +213,8 @@ pub fn try_invoke_alias(args: &[String]) -> Result<Option<ExitCode>> {
             } else {
                 format!("{} {}", shortcut.command, parse_cmd_args(extra_args))
             };
+
+            eprintln!("{command}");
 
             // Execute the command first; persistence should not affect command execution.
             let start = Instant::now();

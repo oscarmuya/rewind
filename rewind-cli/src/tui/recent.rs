@@ -665,7 +665,7 @@ fn ui(frame: &mut Frame, app: &mut App<'_>) {
     }
 
     if let Some(textarea) = app.edit_input.as_mut() {
-        render_editor_modal(frame, textarea);
+        render_editor_modal(frame, textarea, "run");
     }
 }
 
@@ -679,7 +679,10 @@ fn render_search_bar(frame: &mut Frame, app: &App<'_>, area: Rect) {
 }
 
 fn render_top_bar(frame: &mut Frame, area: Rect) {
-    let top = Paragraph::new(top_bar(area.width));
+    let top = Paragraph::new(top_bar(
+        area.width,
+        "per-project command history for your shell",
+    ));
     frame.render_widget(top, area);
 }
 

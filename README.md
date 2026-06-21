@@ -289,6 +289,15 @@ rw shortcut add --global gs git status --short
 rw gs
 ```
 
+Open the shortcut manager for the current project (including global shortcuts):
+
+```sh
+rw shortcut
+```
+
+Use `Enter` to edit the selected command, `dd` to delete it, and `q` or `Esc`
+to close the TUI.
+
 List shortcuts for the current project, including global shortcuts:
 
 ```sh
@@ -301,6 +310,13 @@ List only global shortcuts:
 rw shortcut list --global
 ```
 
+Edit a shortcut from the terminal:
+
+```sh
+rw shortcut edit test cargo test --workspace
+rw shortcut edit --global gs git status --branch
+```
+
 Remove a shortcut:
 
 ```sh
@@ -311,6 +327,9 @@ rw shortcut remove gs --global
 Project shortcuts take precedence over global shortcuts with the same alias.
 Reserved `rw` subcommand names, such as `search`, `status`, and `shortcut`,
 cannot be used as shortcut aliases.
+
+When a shortcut runs, Rewind prints the expanded command to stderr before
+executing it.
 
 ## Data Files
 
