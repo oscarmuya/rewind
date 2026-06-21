@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::{Datelike, Local};
 use clap::Args as ClapArgs;
 use rewind_core::{
@@ -49,6 +49,10 @@ pub struct Args {
     /// Print matches to stdout instead of opening the TUI.
     #[arg(long)]
     pub plain: bool,
+
+    /// Replay the Nth most recent matching command.
+    #[arg(long, hide = true)]
+    pub index: Option<usize>,
 }
 
 pub fn execute(args: self::Args) -> Result<ExitCode> {
@@ -62,7 +66,7 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     let context = FilterContext::new(&cwd_str, git_repo, git_branch);
 
     let mut filter = Filter::new()
-        .limit(args.limit)
+        .limit(args.index.unwrap_or(args.limit))
         .project_cwd(&project_root_str);
 
     if args.cwd {
@@ -94,6 +98,26 @@ pub fn execute(args: self::Args) -> Result<ExitCode> {
     }
 
     let conn = db::open()?;
+
+    if let Some(index) = args.index {
+        if index == 0 {
+            bail!("recent command index must be 1 or greater");
+        }
+
+        let entries = query::fetch(&conn, &filter)?;
+        let Some(entry) = entries.get(index - 1) else {
+            bail!("recent command -{index} was not found");
+        };
+
+        if args.plain {
+            println!("{}", entry.command);
+            io::stdout().flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+
+        eprintln!("{}", entry.command);
+        return rerun_entry(entry);
+    }
 
     if !args.plain {
         if let Some(entry) = crate::tui::run_recent(&conn, context, filter, None)? {

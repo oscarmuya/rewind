@@ -185,6 +185,16 @@ Run `rw` to open the recent-command picker:
 rw
 ```
 
+Replay the Nth most recent command directly (after applying any filters):
+
+```sh
+rw -1
+rw -2 --repo --ok
+rw -3 --plain
+```
+
+The command is printed before it runs. With `--plain`, it is only printed.
+
 Print recent history without opening the TUI:
 
 ```sh
